@@ -1,6 +1,6 @@
 [project]
 name = "gumloop-mcp"
-dynamic = ["version"]
+version = "0.1.0"
 description = "guMCP (Gumloop Model Context Protocol) SDK"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,22 +36,19 @@ ws = ["websockets>=15.0.1"]
 resolution = "lowest-direct"
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.uv-dynamic-versioning]
-vcs = "git"
-style = "pep440"
-bump = true
 
 [project.urls]
 "Homepage" = "https://github.com/gumloop/gumloop-mcp"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp"]
+package-data = true
+
+# This explicitly defines "mcp" as the top-level package name
+[tool.hatch.build.targets.wheel.sources]
+"src/mcp" = "mcp"
 
 [tool.pyright]
 include = ["src/mcp"]

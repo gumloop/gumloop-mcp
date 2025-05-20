@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from .client.session import ClientSession
 from .client.session_group import ClientSessionGroup
 from .client.stdio import StdioServerParameters, stdio_client
