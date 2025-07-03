@@ -160,7 +160,6 @@ class Server(Generic[LifespanResultT]):
         name: str,
         version: str | None = None,
         instructions: str | None = None,
-        config: dict | None = None,
         lifespan: Callable[
             [Server[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]
         ] = lifespan,
@@ -168,7 +167,6 @@ class Server(Generic[LifespanResultT]):
         self.name = name
         self.version = version
         self.instructions = instructions
-        self.config = config
         self.lifespan = lifespan
         self.request_handlers: dict[
             type, Callable[..., Awaitable[types.ServerResult]]
@@ -422,8 +420,9 @@ class Server(Generic[LifespanResultT]):
                 tools = await func()
                 
                 # Filter for external clients
-                if self.config and self.config.get("external_client"):
-                    tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
+                if hasattr(self, "config") and self.config is not None:
+                    if self.config.get("external_client", False):
+                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
                 
                 return types.ServerResult(types.ListToolsResult(tools=tools))
 
@@ -451,8 +450,9 @@ class Server(Generic[LifespanResultT]):
                     content = list(results)
                     
                     # Filter for external clients
-                    if self.config and self.config.get("external_client"):
-                        content = filter_response_content_for_external_mcp(content)
+                    if hasattr(self, "config") and self.config is not None:
+                        if self.config.get("external_client", False):
+                            content = filter_response_content_for_external_mcp(content)
                     
                     return types.ServerResult(
                         types.CallToolResult(content=content, isError=False)
