@@ -70,6 +70,7 @@ from __future__ import annotations as _annotations
 import contextvars
 import logging
 import warnings
+import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Any, Generic, TypeVar
@@ -96,6 +97,36 @@ LifespanResultT = TypeVar("LifespanResultT")
 request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any]] = (
     contextvars.ContextVar("request_ctx")
 )
+
+
+def filter_tool_definition_for_external_mcp(tool_def):
+    """Remove custom guMCP extensions from tool definition for external MCP compatibility"""
+    if tool_def is None:
+        return tool_def
+
+    filtered_tool = copy.deepcopy(tool_def)
+    custom_fields = ["outputSchema", "requiredScopes", "creditCost"]
+
+    for field in custom_fields:
+        if hasattr(filtered_tool, field):
+            delattr(filtered_tool, field)
+
+    return filtered_tool
+
+
+def filter_response_content_for_external_mcp(content_list):
+    """Remove creditCost from TextContent responses for external MCP compatibility"""
+    if not content_list:
+        return content_list
+
+    filtered_content = []
+    for content in content_list:
+        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
+            filtered_content.append(types.TextContent(type=content.type, text=content.text))
+        else:
+            filtered_content.append(content)
+
+    return filtered_content
 
 
 class NotificationOptions:
@@ -387,6 +418,12 @@ class Server(Generic[LifespanResultT]):
 
             async def handler(_: Any):
                 tools = await func()
+                
+                # Filter for external clients
+                if hasattr(self, "config") and self.config is not None:
+                    if self.config.get("external_client", False):
+                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
+                
                 return types.ServerResult(types.ListToolsResult(tools=tools))
 
             self.request_handlers[types.ListToolsRequest] = handler
@@ -410,8 +447,15 @@ class Server(Generic[LifespanResultT]):
             async def handler(req: types.CallToolRequest):
                 try:
                     results = await func(req.params.name, (req.params.arguments or {}))
+                    content = list(results)
+                    
+                    # Filter for external clients
+                    if hasattr(self, "config") and self.config is not None:
+                        if self.config.get("external_client", False):
+                            content = filter_response_content_for_external_mcp(content)
+                    
                     return types.ServerResult(
-                        types.CallToolResult(content=list(results), isError=False)
+                        types.CallToolResult(content=content, isError=False)
                     )
                 except Exception as e:
                     return types.ServerResult(
