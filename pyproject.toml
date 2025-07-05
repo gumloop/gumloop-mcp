@@ -1,6 +1,6 @@
 [project]
 name = "gumloop-mcp"
-version = "0.1.1"
+dynamic = ["version"]
 description = "guMCP (Gumloop Model Context Protocol) SDK"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,8 +36,10 @@ ws = ["websockets>=15.0.1"]
 resolution = "lowest-direct"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "setuptools-scm"]
 build-backend = "hatchling.build"
+
+[tool.setuptools-scm]
 
 [project.urls]
 "Homepage" = "https://github.com/gumloop/gumloop-mcp"
