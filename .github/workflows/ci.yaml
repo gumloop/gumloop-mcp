@@ -35,10 +35,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine keyring keyrings.google-artifactregistry-auth
 
+      - name: Auto-increment version and tag
+        uses: anothrNick/github-tag-action@1.73.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_CI_CD_TAG_TOKEN }}
+          WITH_V: true
+          DEFAULT_BUMP: patch
+
       - name: Build package
         run: |
           python -m build
 
       - name: Deploy to Google Artifact Registry
         run: |
-          python -m twine upload --repository-url https://us-west1-python.pkg.dev/agenthub-dev/gumloop/ dist/* --skip-existing 
+          python -m twine upload --repository-url https://us-west1-python.pkg.dev/agenthub-dev/gumloop/ dist/* 
