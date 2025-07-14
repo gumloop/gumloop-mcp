@@ -305,8 +305,9 @@ class ClientSession(
             progress_callback=progress_callback,
         )
 
-        if not result.isError:
-            await self._validate_tool_result(name, result)
+        # TODO: Re-enable this when we fix outputSchema to work correctly
+        # if not result.isError:
+        #     await self._validate_tool_result(name, result)
 
         return result
 

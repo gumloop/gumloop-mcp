@@ -71,6 +71,7 @@ import contextvars
 import json
 import logging
 import warnings
+import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Any, Generic, TypeAlias, cast
@@ -103,6 +104,35 @@ CombinationContent: TypeAlias = tuple[UnstructuredContent, StructuredContent]
 
 # This will be properly typed in each Server instance's context
 request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = contextvars.ContextVar("request_ctx")
+
+def filter_tool_definition_for_external_mcp(tool_def):
+    """Remove custom guMCP extensions from tool definition for external MCP compatibility"""
+    if tool_def is None:
+        return tool_def
+
+    filtered_tool = copy.deepcopy(tool_def)
+    custom_fields = ["outputSchema", "requiredScopes", "creditCost"]
+
+    for field in custom_fields:
+        if hasattr(filtered_tool, field):
+            delattr(filtered_tool, field)
+
+    return filtered_tool
+
+
+def filter_response_content_for_external_mcp(content_list):
+    """Remove creditCost from TextContent responses for external MCP compatibility"""
+    if not content_list:
+        return content_list
+
+    filtered_content = []
+    for content in content_list:
+        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
+            filtered_content.append(types.TextContent(type=content.type, text=content.text))
+        else:
+            filtered_content.append(content)
+
+    return filtered_content
 
 
 class NotificationOptions:
@@ -172,7 +202,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return InitializationOptions(
             server_name=self.name,
-            server_version=self.version if self.version else pkg_version("mcp"),
+            server_version=self.version if self.version else pkg_version("gumloop-mcp"),
             capabilities=self.get_capabilities(
                 notification_options or NotificationOptions(),
                 experimental_capabilities or {},
@@ -387,6 +417,12 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             async def handler(_: Any):
                 tools = await func()
+
+                # Filter for external clients
+                if hasattr(self, "config") and self.config is not None:
+                    if self.config.get("external_client", False):
+                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
+
                 # Refresh the tool cache
                 self._tool_cache.clear()
                 for tool in tools:
@@ -461,41 +497,17 @@ class Server(Generic[LifespanResultT, RequestT]):
 
                     # tool call
                     results = await func(tool_name, arguments)
-
-                    # output normalization
-                    unstructured_content: UnstructuredContent
-                    maybe_structured_content: StructuredContent | None
-                    if isinstance(results, tuple) and len(results) == 2:
-                        # tool returned both structured and unstructured content
-                        unstructured_content, maybe_structured_content = cast(CombinationContent, results)
-                    elif isinstance(results, dict):
-                        # tool returned structured content only
-                        maybe_structured_content = cast(StructuredContent, results)
-                        unstructured_content = [types.TextContent(type="text", text=json.dumps(results, indent=2))]
-                    elif hasattr(results, "__iter__"):
-                        # tool returned unstructured content only
-                        unstructured_content = cast(UnstructuredContent, results)
-                        maybe_structured_content = None
-                    else:
-                        return self._make_error_result(f"Unexpected return type from tool: {type(results).__name__}")
-
-                    # output validation
-                    if tool and tool.outputSchema is not None:
-                        if maybe_structured_content is None:
-                            return self._make_error_result(
-                                "Output validation error: outputSchema defined but no structured output returned"
-                            )
-                        else:
-                            try:
-                                jsonschema.validate(instance=maybe_structured_content, schema=tool.outputSchema)
-                            except jsonschema.ValidationError as e:
-                                return self._make_error_result(f"Output validation error: {e.message}")
+                    content = list(results)
+                    
+                    # Filter for external clients
+                    if hasattr(self, "config") and self.config is not None:
+                        if self.config.get("external_client", False):
+                            content = filter_response_content_for_external_mcp(content)                    
 
                     # result
                     return types.ServerResult(
                         types.CallToolResult(
-                            content=list(unstructured_content),
-                            structuredContent=maybe_structured_content,
+                            content=list(content),
                             isError=False,
                         )
                     )
