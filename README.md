@@ -15,7 +15,7 @@ The main src/ folder should be rebased from `main` of the official repository fr
 To build the package:
 
 ```bash
-python -m build
+python -m build --verbose --no-isolation
 ```
 
 This will create distribution packages in the `dist/` directory.
