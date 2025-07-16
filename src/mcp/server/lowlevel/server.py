@@ -127,7 +127,7 @@ def filter_deprecated_properties_from_tool(tool_def):
     # Find deprecated properties
     deprecated_props = {
         name for name, prop in properties.items()
-        if prop.get('isDeprecated') is True
+        if prop.get('is_deprecated') is True
     }
     
     # Return original if no deprecated properties found
