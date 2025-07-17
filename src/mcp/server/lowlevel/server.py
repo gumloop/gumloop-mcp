@@ -120,6 +120,30 @@ def filter_tool_definition_for_external_mcp(tool_def):
     return filtered_tool
 
 
+def filter_deprecated_properties_from_tool(tool_def):
+    """Remove properties marked as deprecated from tool definition"""
+    properties = tool_def.inputSchema['properties']
+    
+    # Find deprecated properties
+    deprecated_props = {
+        name for name, prop in properties.items()
+        if prop.get('is_deprecated') is True
+    }
+    
+    # Return original if no deprecated properties found
+    if not deprecated_props:
+        return tool_def
+    
+    # Create filtered tool
+    filtered_tool = copy.deepcopy(tool_def)
+    filtered_tool.inputSchema['properties'] = {
+        name: prop for name, prop in properties.items()
+        if name not in deprecated_props
+    }
+
+    return filtered_tool
+
+
 def filter_response_content_for_external_mcp(content_list):
     """Remove creditCost from TextContent responses for external MCP compatibility"""
     if not content_list:
@@ -417,6 +441,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             async def handler(_: Any):
                 tools = await func()
+
+                # Filter deprecated properties from all tools
+                tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
 
                 # Filter for external clients
                 if hasattr(self, "config") and self.config is not None:
