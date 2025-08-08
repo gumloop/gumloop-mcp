@@ -442,6 +442,9 @@ class Server(Generic[LifespanResultT, RequestT]):
             async def handler(_: Any):
                 tools = await func()
 
+                # Filter deprecated tools
+                tools = [tool for tool in tools if not getattr(tool, 'is_deprecated', False)]
+
                 # Filter deprecated properties from all tools
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
 
