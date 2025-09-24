@@ -150,7 +150,7 @@ class CallbackServer:
 class SimpleAuthClient:
     """Simple MCP client with auth support."""
 
-    def __init__(self, server_url: str, transport_type: str = "streamable_http"):
+    def __init__(self, server_url: str, transport_type: str = "streamable-http"):
         self.server_url = server_url
         self.transport_type = transport_type
         self.session: ClientSession | None = None
@@ -188,9 +188,7 @@ class SimpleAuthClient:
             # Create OAuth authentication handler using the new interface
             oauth_auth = OAuthClientProvider(
                 server_url=self.server_url.replace("/mcp", ""),
-                client_metadata=OAuthClientMetadata.model_validate(
-                    client_metadata_dict
-                ),
+                client_metadata=OAuthClientMetadata.model_validate(client_metadata_dict),
                 storage=InMemoryTokenStorage(),
                 redirect_handler=_default_redirect_handler,
                 callback_handler=callback_handler,
@@ -322,9 +320,7 @@ class SimpleAuthClient:
                     await self.call_tool(tool_name, arguments)
 
                 else:
-                    print(
-                        "❌ Unknown command. Try 'list', 'call <tool_name>', or 'quit'"
-                    )
+                    print("❌ Unknown command. Try 'list', 'call <tool_name>', or 'quit'")
 
             except KeyboardInterrupt:
                 print("\n\n👋 Goodbye!")
@@ -338,10 +334,10 @@ async def main():
     # Default server URL - can be overridden with environment variable
     # Most MCP streamable HTTP servers use /mcp as the endpoint
     server_url = os.getenv("MCP_SERVER_PORT", 8000)
-    transport_type = os.getenv("MCP_TRANSPORT_TYPE", "streamable_http")
+    transport_type = os.getenv("MCP_TRANSPORT_TYPE", "streamable-http")
     server_url = (
         f"http://localhost:{server_url}/mcp"
-        if transport_type == "streamable_http"
+        if transport_type == "streamable-http"
         else f"http://localhost:{server_url}/sse"
     )
 
