@@ -506,17 +506,33 @@ class Server(Generic[LifespanResultT, RequestT]):
 
                 # Handle both old style (list[Tool]) and new style (ListToolsResult)
                 if isinstance(result, types.ListToolsResult):
-                    # Refresh the tool cache with returned tools
-                    for tool in result.tools:
-                        self._tool_cache[tool.name] = tool
-                    return types.ServerResult(result)
+                    tools = result.tools
                 else:
                     # Old style returns list[Tool]
-                    # Clear and refresh the entire tool cache
-                    self._tool_cache.clear()
-                    for tool in result:
-                        self._tool_cache[tool.name] = tool
-                    return types.ServerResult(types.ListToolsResult(tools=result))
+                    tools = result
+
+                # Filter deprecated tools
+                tools = [
+                    tool for tool in tools if not getattr(tool, "is_deprecated", False)
+                ]
+
+                # Filter deprecated properties from all tools
+                tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
+
+                # Filter for external clients
+                if hasattr(self, "config") and self.config is not None:
+                    if self.config.get("external_client", False):
+                        tools = [
+                            filter_tool_definition_for_external_mcp(tool)
+                            for tool in tools
+                        ]
+
+                # Refresh the tool cache with filtered tools
+                self._tool_cache.clear()
+                for tool in tools:
+                    self._tool_cache[tool.name] = tool
+
+                return types.ServerResult(types.ListToolsResult(tools=tools))
 
             self.request_handlers[types.ListToolsRequest] = handler
             return func
