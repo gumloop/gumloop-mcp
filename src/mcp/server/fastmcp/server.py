@@ -4,16 +4,13 @@ from __future__ import annotations as _annotations
 
 import inspect
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
-from contextlib import (
-    AbstractAsyncContextManager,
-    asynccontextmanager,
-)
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Generic, Literal
 
 import anyio
 import pydantic_core
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic.networks import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.applications import Starlette
@@ -25,10 +22,7 @@ from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
-from mcp.server.auth.middleware.bearer_auth import (
-    BearerAuthBackend,
-    RequireAuthMiddleware,
-)
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.auth.provider import OAuthAuthorizationServerProvider, ProviderTokenVerifier, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.elicitation import ElicitationResult, ElicitSchemaModelT, elicit_with_validation
@@ -36,6 +30,7 @@ from mcp.server.fastmcp.exceptions import ResourceError
 from mcp.server.fastmcp.prompts import Prompt, PromptManager
 from mcp.server.fastmcp.resources import FunctionResource, Resource, ResourceManager
 from mcp.server.fastmcp.tools import Tool, ToolManager
+from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
 from mcp.server.fastmcp.utilities.logging import configure_logging, get_logger
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import LifespanResultT
@@ -48,12 +43,7 @@ from mcp.server.streamable_http import EventStore
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.context import LifespanContextT, RequestContext, RequestT
-from mcp.types import (
-    AnyFunction,
-    ContentBlock,
-    GetPromptResult,
-    ToolAnnotations,
-)
+from mcp.types import AnyFunction, ContentBlock, GetPromptResult, Icon, ToolAnnotations
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from mcp.types import Resource as MCPResource
@@ -79,75 +69,114 @@ class Settings(BaseSettings, Generic[LifespanResultT]):
     )
 
     # Server settings
-    debug: bool = False
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    debug: bool
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
     # HTTP settings
-    host: str = "127.0.0.1"
-    port: int = 8000
-    mount_path: str = "/"  # Mount path (e.g. "/github", defaults to root path)
-    sse_path: str = "/sse"
-    message_path: str = "/messages/"
-    streamable_http_path: str = "/mcp"
+    host: str
+    port: int
+    mount_path: str
+    sse_path: str
+    message_path: str
+    streamable_http_path: str
 
     # StreamableHTTP settings
-    json_response: bool = False
-    stateless_http: bool = False  # If True, uses true stateless mode (new transport per request)
+    json_response: bool
+    stateless_http: bool
+    """Define if the server should create a new transport per request."""
 
     # resource settings
-    warn_on_duplicate_resources: bool = True
+    warn_on_duplicate_resources: bool
 
     # tool settings
-    warn_on_duplicate_tools: bool = True
+    warn_on_duplicate_tools: bool
 
     # prompt settings
-    warn_on_duplicate_prompts: bool = True
+    warn_on_duplicate_prompts: bool
 
-    dependencies: list[str] = Field(
-        default_factory=list,
-        description="List of dependencies to install in the server environment",
-    )
+    # TODO(Marcelo): Investigate if this is used. If it is, it's probably a good idea to remove it.
+    dependencies: list[str]
+    """A list of dependencies to install in the server environment."""
 
-    lifespan: Callable[[FastMCP], AbstractAsyncContextManager[LifespanResultT]] | None = Field(
-        None, description="Lifespan context manager"
-    )
+    lifespan: Callable[[FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]] | None
+    """A async context manager that will be called when the server is started."""
 
-    auth: AuthSettings | None = None
+    auth: AuthSettings | None
 
     # Transport security settings (DNS rebinding protection)
-    transport_security: TransportSecuritySettings | None = None
+    transport_security: TransportSecuritySettings | None
 
 
 def lifespan_wrapper(
-    app: FastMCP,
-    lifespan: Callable[[FastMCP], AbstractAsyncContextManager[LifespanResultT]],
-) -> Callable[[MCPServer[LifespanResultT, Request]], AbstractAsyncContextManager[object]]:
+    app: FastMCP[LifespanResultT],
+    lifespan: Callable[[FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]],
+) -> Callable[[MCPServer[LifespanResultT, Request]], AbstractAsyncContextManager[LifespanResultT]]:
     @asynccontextmanager
-    async def wrap(s: MCPServer[LifespanResultT, Request]) -> AsyncIterator[object]:
+    async def wrap(_: MCPServer[LifespanResultT, Request]) -> AsyncIterator[LifespanResultT]:
         async with lifespan(app) as context:
             yield context
 
     return wrap
 
 
-class FastMCP:
-    def __init__(
+class FastMCP(Generic[LifespanResultT]):
+    def __init__(  # noqa: PLR0913
         self,
         name: str | None = None,
         instructions: str | None = None,
+        website_url: str | None = None,
+        icons: list[Icon] | None = None,
         auth_server_provider: OAuthAuthorizationServerProvider[Any, Any, Any] | None = None,
         token_verifier: TokenVerifier | None = None,
         event_store: EventStore | None = None,
         *,
         tools: list[Tool] | None = None,
-        **settings: Any,
+        debug: bool = False,
+        log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        mount_path: str = "/",
+        sse_path: str = "/sse",
+        message_path: str = "/messages/",
+        streamable_http_path: str = "/mcp",
+        json_response: bool = False,
+        stateless_http: bool = False,
+        warn_on_duplicate_resources: bool = True,
+        warn_on_duplicate_tools: bool = True,
+        warn_on_duplicate_prompts: bool = True,
+        dependencies: Collection[str] = (),
+        lifespan: Callable[[FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]] | None = None,
+        auth: AuthSettings | None = None,
+        transport_security: TransportSecuritySettings | None = None,
     ):
-        self.settings = Settings(**settings)
+        self.settings = Settings(
+            debug=debug,
+            log_level=log_level,
+            host=host,
+            port=port,
+            mount_path=mount_path,
+            sse_path=sse_path,
+            message_path=message_path,
+            streamable_http_path=streamable_http_path,
+            json_response=json_response,
+            stateless_http=stateless_http,
+            warn_on_duplicate_resources=warn_on_duplicate_resources,
+            warn_on_duplicate_tools=warn_on_duplicate_tools,
+            warn_on_duplicate_prompts=warn_on_duplicate_prompts,
+            dependencies=list(dependencies),
+            lifespan=lifespan,
+            auth=auth,
+            transport_security=transport_security,
+        )
 
         self._mcp_server = MCPServer(
             name=name or "FastMCP",
             instructions=instructions,
-            lifespan=(lifespan_wrapper(self, self.settings.lifespan) if self.settings.lifespan else default_lifespan),
+            website_url=website_url,
+            icons=icons,
+            # TODO(Marcelo): It seems there's a type mismatch between the lifespan type from an FastMCP and Server.
+            # We need to create a Lifespan type that is a generic on the server type, like Starlette does.
+            lifespan=(lifespan_wrapper(self, self.settings.lifespan) if self.settings.lifespan else default_lifespan),  # type: ignore
         )
         self._tool_manager = ToolManager(tools=tools, warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = ResourceManager(warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources)
@@ -158,9 +187,8 @@ class FastMCP:
                 raise ValueError("Cannot specify both auth_server_provider and token_verifier")
             if not auth_server_provider and not token_verifier:
                 raise ValueError("Must specify either auth_server_provider or token_verifier when auth is enabled")
-        else:
-            if auth_server_provider or token_verifier:
-                raise ValueError("Cannot specify auth_server_provider or token_verifier without auth settings")
+        elif auth_server_provider or token_verifier:
+            raise ValueError("Cannot specify auth_server_provider or token_verifier without auth settings")
 
         self._auth_server_provider = auth_server_provider
         self._token_verifier = token_verifier
@@ -186,6 +214,14 @@ class FastMCP:
     @property
     def instructions(self) -> str | None:
         return self._mcp_server.instructions
+
+    @property
+    def website_url(self) -> str | None:
+        return self._mcp_server.website_url
+
+    @property
+    def icons(self) -> list[Icon] | None:
+        return self._mcp_server.icons
 
     @property
     def session_manager(self) -> StreamableHTTPSessionManager:
@@ -253,11 +289,12 @@ class FastMCP:
                 inputSchema=info.parameters,
                 outputSchema=info.output_schema,
                 annotations=info.annotations,
+                icons=info.icons,
             )
             for info in tools
         ]
 
-    def get_context(self) -> Context[ServerSession, object, Request]:
+    def get_context(self) -> Context[ServerSession, LifespanResultT, Request]:
         """
         Returns a Context object. Note that the context will only be valid
         during a request; outside a request, most methods will error.
@@ -284,6 +321,7 @@ class FastMCP:
                 title=resource.title,
                 description=resource.description,
                 mimeType=resource.mime_type,
+                icons=resource.icons,
             )
             for resource in resources
         ]
@@ -296,6 +334,7 @@ class FastMCP:
                 name=template.name,
                 title=template.title,
                 description=template.description,
+                mimeType=template.mime_type,
             )
             for template in templates
         ]
@@ -303,7 +342,8 @@ class FastMCP:
     async def read_resource(self, uri: AnyUrl | str) -> Iterable[ReadResourceContents]:
         """Read a resource by URI."""
 
-        resource = await self._resource_manager.get_resource(uri)
+        context = self.get_context()
+        resource = await self._resource_manager.get_resource(uri, context=context)
         if not resource:
             raise ResourceError(f"Unknown resource: {uri}")
 
@@ -321,6 +361,7 @@ class FastMCP:
         title: str | None = None,
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
         structured_output: bool | None = None,
     ) -> None:
         """Add a tool to the server.
@@ -336,7 +377,7 @@ class FastMCP:
             annotations: Optional ToolAnnotations providing additional tool information
             structured_output: Controls whether the tool's output is structured or unstructured
                 - If None, auto-detects based on the function's return type annotation
-                - If True, unconditionally creates a structured tool (return type annotation permitting)
+                - If True, creates a structured tool (return type annotation permitting)
                 - If False, unconditionally creates an unstructured tool
         """
         self._tool_manager.add_tool(
@@ -345,6 +386,7 @@ class FastMCP:
             title=title,
             description=description,
             annotations=annotations,
+            icons=icons,
             structured_output=structured_output,
         )
 
@@ -354,6 +396,7 @@ class FastMCP:
         title: str | None = None,
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
         structured_output: bool | None = None,
     ) -> Callable[[AnyFunction], AnyFunction]:
         """Decorator to register a tool.
@@ -369,7 +412,7 @@ class FastMCP:
             annotations: Optional ToolAnnotations providing additional tool information
             structured_output: Controls whether the tool's output is structured or unstructured
                 - If None, auto-detects based on the function's return type annotation
-                - If True, unconditionally creates a structured tool (return type annotation permitting)
+                - If True, creates a structured tool (return type annotation permitting)
                 - If False, unconditionally creates an unstructured tool
 
         Example:
@@ -400,6 +443,7 @@ class FastMCP:
                 title=title,
                 description=description,
                 annotations=annotations,
+                icons=icons,
                 structured_output=structured_output,
             )
             return fn
@@ -440,6 +484,7 @@ class FastMCP:
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
     ) -> Callable[[AnyFunction], AnyFunction]:
         """Decorator to register a function as a resource.
 
@@ -487,13 +532,19 @@ class FastMCP:
 
         def decorator(fn: AnyFunction) -> AnyFunction:
             # Check if this should be a template
+            sig = inspect.signature(fn)
             has_uri_params = "{" in uri and "}" in uri
-            has_func_params = bool(inspect.signature(fn).parameters)
+            has_func_params = bool(sig.parameters)
 
             if has_uri_params or has_func_params:
-                # Validate that URI params match function params
+                # Check for Context parameter to exclude from validation
+                context_param = find_context_parameter(fn)
+
+                # Validate that URI params match function params (excluding context)
                 uri_params = set(re.findall(r"{(\w+)}", uri))
-                func_params = set(inspect.signature(fn).parameters.keys())
+                # We need to remove the context_param from the resource function if
+                # there is any.
+                func_params = {p for p in sig.parameters.keys() if p != context_param}
 
                 if uri_params != func_params:
                     raise ValueError(
@@ -508,6 +559,7 @@ class FastMCP:
                     title=title,
                     description=description,
                     mime_type=mime_type,
+                    # Note: Resource templates don't support icons
                 )
             else:
                 # Register as regular resource
@@ -518,6 +570,7 @@ class FastMCP:
                     title=title,
                     description=description,
                     mime_type=mime_type,
+                    icons=icons,
                 )
                 self.add_resource(resource)
             return fn
@@ -533,7 +586,11 @@ class FastMCP:
         self._prompt_manager.add_prompt(prompt)
 
     def prompt(
-        self, name: str | None = None, title: str | None = None, description: str | None = None
+        self,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        icons: list[Icon] | None = None,
     ) -> Callable[[AnyFunction], AnyFunction]:
         """Decorator to register a prompt.
 
@@ -577,7 +634,7 @@ class FastMCP:
             )
 
         def decorator(func: AnyFunction) -> AnyFunction:
-            prompt = Prompt.from_function(func, name=name, title=title, description=description)
+            prompt = Prompt.from_function(func, name=name, title=title, description=description, icons=icons)
             self.add_prompt(prompt)
             return func
 
@@ -948,6 +1005,7 @@ class FastMCP:
                     )
                     for arg in (prompt.arguments or [])
                 ],
+                icons=prompt.icons,
             )
             for prompt in prompts
         ]
@@ -959,7 +1017,7 @@ class FastMCP:
             if not prompt:
                 raise ValueError(f"Unknown prompt: {name}")
 
-            messages = await prompt.render(arguments)
+            messages = await prompt.render(arguments, context=self.get_context())
 
             return GetPromptResult(
                 description=prompt.description,

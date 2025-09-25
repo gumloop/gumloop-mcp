@@ -11,7 +11,7 @@ Usage:
 
 2. Define request handlers using decorators:
    @server.list_prompts()
-   async def handle_list_prompts() -> list[types.Prompt]:
+   async def handle_list_prompts(request: types.ListPromptsRequest) -> types.ListPromptsResult:
        # Implementation
 
    @server.get_prompt()
@@ -21,7 +21,7 @@ Usage:
        # Implementation
 
    @server.list_tools()
-   async def handle_list_tools() -> list[types.Tool]:
+   async def handle_list_tools(request: types.ListToolsRequest) -> types.ListToolsResult:
        # Implementation
 
    @server.call_tool()
@@ -83,10 +83,10 @@ from pydantic import AnyUrl
 from typing_extensions import TypeVar
 
 import mcp.types as types
+from mcp.server.lowlevel.func_inspection import create_call_wrapper
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.session import ServerSession
-from mcp.server.stdio import stdio_server as stdio_server
 from mcp.shared.context import RequestContext
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
@@ -94,7 +94,7 @@ from mcp.shared.session import RequestResponder
 
 logger = logging.getLogger(__name__)
 
-LifespanResultT = TypeVar("LifespanResultT")
+LifespanResultT = TypeVar("LifespanResultT", default=Any)
 RequestT = TypeVar("RequestT", default=Any)
 
 # type aliases for tool call results
@@ -103,7 +103,10 @@ UnstructuredContent: TypeAlias = Iterable[types.ContentBlock]
 CombinationContent: TypeAlias = tuple[UnstructuredContent, StructuredContent]
 
 # This will be properly typed in each Server instance's context
-request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = contextvars.ContextVar("request_ctx")
+request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = (
+    contextvars.ContextVar("request_ctx")
+)
+
 
 def filter_tool_definition_for_external_mcp(tool_def):
     """Remove custom guMCP extensions from tool definition for external MCP compatibility"""
@@ -122,23 +125,21 @@ def filter_tool_definition_for_external_mcp(tool_def):
 
 def filter_deprecated_properties_from_tool(tool_def):
     """Remove properties marked as deprecated from tool definition"""
-    properties = tool_def.inputSchema['properties']
-    
+    properties = tool_def.inputSchema["properties"]
+
     # Find deprecated properties
     deprecated_props = {
-        name for name, prop in properties.items()
-        if prop.get('is_deprecated') is True
+        name for name, prop in properties.items() if prop.get("is_deprecated") is True
     }
-    
+
     # Return original if no deprecated properties found
     if not deprecated_props:
         return tool_def
-    
+
     # Create filtered tool
     filtered_tool = copy.deepcopy(tool_def)
-    filtered_tool.inputSchema['properties'] = {
-        name: prop for name, prop in properties.items()
-        if name not in deprecated_props
+    filtered_tool.inputSchema["properties"] = {
+        name: prop for name, prop in properties.items() if name not in deprecated_props
     }
 
     return filtered_tool
@@ -152,7 +153,9 @@ def filter_response_content_for_external_mcp(content_list):
     filtered_content = []
     for content in content_list:
         if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
-            filtered_content.append(types.TextContent(type=content.type, text=content.text))
+            filtered_content.append(
+                types.TextContent(type=content.type, text=content.text)
+            )
         else:
             filtered_content.append(content)
 
@@ -172,7 +175,9 @@ class NotificationOptions:
 
 
 @asynccontextmanager
-async def lifespan(server: Server[LifespanResultT, RequestT]) -> AsyncIterator[object]:
+async def lifespan(
+    _: Server[LifespanResultT, RequestT],
+) -> AsyncIterator[dict[str, Any]]:
     """Default lifespan context manager that does nothing.
 
     Args:
@@ -190,6 +195,8 @@ class Server(Generic[LifespanResultT, RequestT]):
         name: str,
         version: str | None = None,
         instructions: str | None = None,
+        website_url: str | None = None,
+        icons: list[types.Icon] | None = None,
         lifespan: Callable[
             [Server[LifespanResultT, RequestT]],
             AbstractAsyncContextManager[LifespanResultT],
@@ -198,12 +205,15 @@ class Server(Generic[LifespanResultT, RequestT]):
         self.name = name
         self.version = version
         self.instructions = instructions
+        self.website_url = website_url
+        self.icons = icons
         self.lifespan = lifespan
-        self.request_handlers: dict[type, Callable[..., Awaitable[types.ServerResult]]] = {
+        self.request_handlers: dict[
+            type, Callable[..., Awaitable[types.ServerResult]]
+        ] = {
             types.PingRequest: _ping_handler,
         }
         self.notification_handlers: dict[type, Callable[..., Awaitable[None]]] = {}
-        self.notification_options = NotificationOptions()
         self._tool_cache: dict[str, types.Tool] = {}
         logger.debug("Initializing server %r", name)
 
@@ -232,6 +242,8 @@ class Server(Generic[LifespanResultT, RequestT]):
                 experimental_capabilities or {},
             ),
             instructions=self.instructions,
+            website_url=self.website_url,
+            icons=self.icons,
         )
 
     def get_capabilities(
@@ -248,7 +260,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set prompt capabilities if handler exists
         if types.ListPromptsRequest in self.request_handlers:
-            prompts_capability = types.PromptsCapability(listChanged=notification_options.prompts_changed)
+            prompts_capability = types.PromptsCapability(
+                listChanged=notification_options.prompts_changed
+            )
 
         # Set resource capabilities if handler exists
         if types.ListResourcesRequest in self.request_handlers:
@@ -258,7 +272,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set tool capabilities if handler exists
         if types.ListToolsRequest in self.request_handlers:
-            tools_capability = types.ToolsCapability(listChanged=notification_options.tools_changed)
+            tools_capability = types.ToolsCapability(
+                listChanged=notification_options.tools_changed
+            )
 
         # Set logging capabilities if handler exists
         if types.SetLevelRequest in self.request_handlers:
@@ -285,12 +301,26 @@ class Server(Generic[LifespanResultT, RequestT]):
         return request_ctx.get()
 
     def list_prompts(self):
-        def decorator(func: Callable[[], Awaitable[list[types.Prompt]]]):
+        def decorator(
+            func: (
+                Callable[[], Awaitable[list[types.Prompt]]]
+                | Callable[
+                    [types.ListPromptsRequest], Awaitable[types.ListPromptsResult]
+                ]
+            ),
+        ):
             logger.debug("Registering handler for PromptListRequest")
 
-            async def handler(_: Any):
-                prompts = await func()
-                return types.ServerResult(types.ListPromptsResult(prompts=prompts))
+            wrapper = create_call_wrapper(func, types.ListPromptsRequest)
+
+            async def handler(req: types.ListPromptsRequest):
+                result = await wrapper(req)
+                # Handle both old style (list[Prompt]) and new style (ListPromptsResult)
+                if isinstance(result, types.ListPromptsResult):
+                    return types.ServerResult(result)
+                else:
+                    # Old style returns list[Prompt]
+                    return types.ServerResult(types.ListPromptsResult(prompts=result))
 
             self.request_handlers[types.ListPromptsRequest] = handler
             return func
@@ -299,7 +329,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def get_prompt(self):
         def decorator(
-            func: Callable[[str, dict[str, str] | None], Awaitable[types.GetPromptResult]],
+            func: Callable[
+                [str, dict[str, str] | None], Awaitable[types.GetPromptResult]
+            ],
         ):
             logger.debug("Registering handler for GetPromptRequest")
 
@@ -313,12 +345,28 @@ class Server(Generic[LifespanResultT, RequestT]):
         return decorator
 
     def list_resources(self):
-        def decorator(func: Callable[[], Awaitable[list[types.Resource]]]):
+        def decorator(
+            func: (
+                Callable[[], Awaitable[list[types.Resource]]]
+                | Callable[
+                    [types.ListResourcesRequest], Awaitable[types.ListResourcesResult]
+                ]
+            ),
+        ):
             logger.debug("Registering handler for ListResourcesRequest")
 
-            async def handler(_: Any):
-                resources = await func()
-                return types.ServerResult(types.ListResourcesResult(resources=resources))
+            wrapper = create_call_wrapper(func, types.ListResourcesRequest)
+
+            async def handler(req: types.ListResourcesRequest):
+                result = await wrapper(req)
+                # Handle both old style (list[Resource]) and new style (ListResourcesResult)
+                if isinstance(result, types.ListResourcesResult):
+                    return types.ServerResult(result)
+                else:
+                    # Old style returns list[Resource]
+                    return types.ServerResult(
+                        types.ListResourcesResult(resources=result)
+                    )
 
             self.request_handlers[types.ListResourcesRequest] = handler
             return func
@@ -331,7 +379,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             async def handler(_: Any):
                 templates = await func()
-                return types.ServerResult(types.ListResourceTemplatesResult(resourceTemplates=templates))
+                return types.ServerResult(
+                    types.ListResourceTemplatesResult(resourceTemplates=templates)
+                )
 
             self.request_handlers[types.ListResourceTemplatesRequest] = handler
             return func
@@ -340,7 +390,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def read_resource(self):
         def decorator(
-            func: Callable[[AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]],
+            func: Callable[
+                [AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]
+            ],
         ):
             logger.debug("Registering handler for ReadResourceRequest")
 
@@ -375,7 +427,8 @@ class Server(Generic[LifespanResultT, RequestT]):
                         content = create_content(data, None)
                     case Iterable() as contents:
                         contents_list = [
-                            create_content(content_item.content, content_item.mime_type) for content_item in contents
+                            create_content(content_item.content, content_item.mime_type)
+                            for content_item in contents
                         ]
                         return types.ServerResult(
                             types.ReadResourceResult(
@@ -383,7 +436,9 @@ class Server(Generic[LifespanResultT, RequestT]):
                             )
                         )
                     case _:
-                        raise ValueError(f"Unexpected return type from read_resource: {type(result)}")
+                        raise ValueError(
+                            f"Unexpected return type from read_resource: {type(result)}"
+                        )
 
                 return types.ServerResult(
                     types.ReadResourceResult(
@@ -436,14 +491,30 @@ class Server(Generic[LifespanResultT, RequestT]):
         return decorator
 
     def list_tools(self):
-        def decorator(func: Callable[[], Awaitable[list[types.Tool]]]):
+        def decorator(
+            func: (
+                Callable[[], Awaitable[list[types.Tool]]]
+                | Callable[[types.ListToolsRequest], Awaitable[types.ListToolsResult]]
+            ),
+        ):
             logger.debug("Registering handler for ListToolsRequest")
 
-            async def handler(_: Any):
-                tools = await func()
+            wrapper = create_call_wrapper(func, types.ListToolsRequest)
+
+            async def handler(req: types.ListToolsRequest):
+                result = await wrapper(req)
+
+                # Handle both old style (list[Tool]) and new style (ListToolsResult)
+                if isinstance(result, types.ListToolsResult):
+                    tools = result.tools
+                else:
+                    # Old style returns list[Tool]
+                    tools = result
 
                 # Filter deprecated tools
-                tools = [tool for tool in tools if not getattr(tool, 'is_deprecated', False)]
+                tools = [
+                    tool for tool in tools if not getattr(tool, "is_deprecated", False)
+                ]
 
                 # Filter deprecated properties from all tools
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
@@ -451,12 +522,16 @@ class Server(Generic[LifespanResultT, RequestT]):
                 # Filter for external clients
                 if hasattr(self, "config") and self.config is not None:
                     if self.config.get("external_client", False):
-                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
+                        tools = [
+                            filter_tool_definition_for_external_mcp(tool)
+                            for tool in tools
+                        ]
 
-                # Refresh the tool cache
+                # Refresh the tool cache with filtered tools
                 self._tool_cache.clear()
                 for tool in tools:
                     self._tool_cache[tool.name] = tool
+
                 return types.ServerResult(types.ListToolsResult(tools=tools))
 
             self.request_handlers[types.ListToolsRequest] = handler
@@ -485,7 +560,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         tool = self._tool_cache.get(tool_name)
         if tool is None:
-            logger.warning("Tool '%s' not listed, no validation will be performed", tool_name)
+            logger.warning(
+                "Tool '%s' not listed, no validation will be performed", tool_name
+            )
 
         return tool
 
@@ -521,18 +598,22 @@ class Server(Generic[LifespanResultT, RequestT]):
                     # input validation
                     if validate_input and tool:
                         try:
-                            jsonschema.validate(instance=arguments, schema=tool.inputSchema)
+                            jsonschema.validate(
+                                instance=arguments, schema=tool.inputSchema
+                            )
                         except jsonschema.ValidationError as e:
-                            return self._make_error_result(f"Input validation error: {e.message}")
+                            return self._make_error_result(
+                                f"Input validation error: {e.message}"
+                            )
 
                     # tool call
                     results = await func(tool_name, arguments)
                     content = list(results)
-                    
+
                     # Filter for external clients
                     if hasattr(self, "config") and self.config is not None:
                         if self.config.get("external_client", False):
-                            content = filter_response_content_for_external_mcp(content)                    
+                            content = filter_response_content_for_external_mcp(content)
 
                     # result
                     return types.ServerResult(
@@ -551,7 +632,9 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def progress_notification(self):
         def decorator(
-            func: Callable[[str | int, float, float | None, str | None], Awaitable[None]],
+            func: Callable[
+                [str | int, float, float | None, str | None], Awaitable[None]
+            ],
         ):
             logger.debug("Registering handler for ProgressNotification")
 
@@ -584,12 +667,16 @@ class Server(Generic[LifespanResultT, RequestT]):
             logger.debug("Registering handler for CompleteRequest")
 
             async def handler(req: types.CompleteRequest):
-                completion = await func(req.params.ref, req.params.argument, req.params.context)
+                completion = await func(
+                    req.params.ref, req.params.argument, req.params.context
+                )
                 return types.ServerResult(
                     types.CompleteResult(
-                        completion=completion
-                        if completion is not None
-                        else types.Completion(values=[], total=None, hasMore=None),
+                        completion=(
+                            completion
+                            if completion is not None
+                            else types.Completion(values=[], total=None, hasMore=None)
+                        ),
                     )
                 )
 
@@ -639,7 +726,11 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     async def _handle_message(
         self,
-        message: RequestResponder[types.ClientRequest, types.ServerResult] | types.ClientNotification | Exception,
+        message: (
+            RequestResponder[types.ClientRequest, types.ServerResult]
+            | types.ClientNotification
+            | Exception
+        ),
         session: ServerSession,
         lifespan_context: LifespanResultT,
         raise_exceptions: bool = False,
@@ -647,14 +738,20 @@ class Server(Generic[LifespanResultT, RequestT]):
         with warnings.catch_warnings(record=True) as w:
             # TODO(Marcelo): We should be checking if message is Exception here.
             match message:  # type: ignore[reportMatchNotExhaustive]
-                case RequestResponder(request=types.ClientRequest(root=req)) as responder:
+                case RequestResponder(
+                    request=types.ClientRequest(root=req)
+                ) as responder:
                     with responder:
-                        await self._handle_request(message, req, session, lifespan_context, raise_exceptions)
+                        await self._handle_request(
+                            message, req, session, lifespan_context, raise_exceptions
+                        )
                 case types.ClientNotification(root=notify):
                     await self._handle_notification(notify)
 
             for warning in w:
-                logger.info("Warning: %s: %s", warning.category.__name__, warning.message)
+                logger.info(
+                    "Warning: %s: %s", warning.category.__name__, warning.message
+                )
 
     async def _handle_request(
         self,
@@ -672,7 +769,9 @@ class Server(Generic[LifespanResultT, RequestT]):
             try:
                 # Extract request context from message metadata
                 request_data = None
-                if message.message_metadata is not None and isinstance(message.message_metadata, ServerMessageMetadata):
+                if message.message_metadata is not None and isinstance(
+                    message.message_metadata, ServerMessageMetadata
+                ):
                     request_data = message.message_metadata.request_context
 
                 # Set our global state that can be retrieved via
@@ -689,6 +788,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                 response = await handler(req)
             except McpError as err:
                 response = err.error
+            except anyio.get_cancelled_exc_class():
+                logger.info(
+                    "Request %s cancelled - duplicate response suppressed",
+                    message.request_id,
+                )
+                return
             except Exception as err:
                 if raise_exceptions:
                     raise err
