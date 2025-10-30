@@ -519,6 +519,14 @@ class Server(Generic[LifespanResultT, RequestT]):
                 # Filter deprecated properties from all tools
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
 
+                # Filter restricted tools
+                if hasattr(self, "config") and self.config is not None:
+                    restricted_tools = self.config.get("restricted_tools", [])
+                    if restricted_tools:
+                        tools = [
+                            tool for tool in tools if tool.name not in restricted_tools
+                        ]
+
                 # Filter for external clients
                 if hasattr(self, "config") and self.config is not None:
                     if self.config.get("external_client", False):
@@ -604,6 +612,14 @@ class Server(Generic[LifespanResultT, RequestT]):
                         except jsonschema.ValidationError as e:
                             return self._make_error_result(
                                 f"Input validation error: {e.message}"
+                            )
+
+                    # Check if tool is restricted
+                    if hasattr(self, "config") and self.config is not None:
+                        restricted_tools = self.config.get("restricted_tools", [])
+                        if tool_name in restricted_tools:
+                            return self._make_error_result(
+                                f"Tool '{tool_name}' is restricted and cannot be used"
                             )
 
                     # tool call
