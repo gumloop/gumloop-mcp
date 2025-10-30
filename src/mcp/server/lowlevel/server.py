@@ -630,6 +630,13 @@ class Server(Generic[LifespanResultT, RequestT]):
                     if hasattr(self, "config") and self.config is not None:
                         if self.config.get("external_client", False):
                             content = filter_response_content_for_external_mcp(content)
+                        
+                        # Aggregate all results into a single content item
+                        if self.config.get("aggregate_tool_call_results", False) and content:
+                            serialized_content = [item.model_dump() for item in content]
+                            content = [
+                                types.TextContent(type="text", text=json.dumps(serialized_content))
+                            ]
 
                     # result
                     return types.ServerResult(
