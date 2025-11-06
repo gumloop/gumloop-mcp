@@ -630,6 +630,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                     if hasattr(self, "config") and self.config is not None:
                         if self.config.get("external_client", False):
                             content = filter_response_content_for_external_mcp(content)
+                            
+                            # Add default message for empty results when gummie_id exists
+                            if not content and self.config.get("gummie_id"):
+                                content = [
+                                    types.TextContent(type="text", text='{"message": "No result found"}')
+                                ]
                         
                         # Aggregate all results into a single content item
                         if self.config.get("aggregate_tool_call_results", False) and content:
