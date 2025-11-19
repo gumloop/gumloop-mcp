@@ -19,6 +19,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from httpx_sse import EventSource, ServerSentEvent, aconnect_sse
 
 from mcp.shared._httpx_utils import McpHttpClientFactory, create_mcp_http_client
+from mcp.shared.logging_utils import redact_url_logs
 from mcp.shared.message import ClientMessageMetadata, SessionMessage
 from mcp.types import (
     ErrorData,
@@ -32,6 +33,9 @@ from mcp.types import (
 )
 
 logger = logging.getLogger(__name__)
+redact_url_logs(logger)
+redact_url_logs(logging.getLogger("httpx"))
+redact_url_logs(logging.getLogger("httpcore"))
 
 
 SessionMessageOrError = SessionMessage | Exception
