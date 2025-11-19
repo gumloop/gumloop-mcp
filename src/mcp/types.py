@@ -179,6 +179,24 @@ class ErrorData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class AuthErrorData(BaseModel):
+    """Error information for authentication and authorization failures."""
+
+    error: str
+    """The error type identifier (e.g., 'credentials_not_found', 'invalid_token', 'insufficient_permissions')."""
+
+    message: str
+    """A human-readable error message."""
+
+    service: str
+    """The service name requiring authentication."""
+
+    error_status: int
+    """The HTTP status code (401, 403, 400, etc.)."""
+
+    model_config = ConfigDict(extra="allow")
+
+
 class JSONRPCError(BaseModel):
     """A response to a request that indicates an error occurred."""
 
