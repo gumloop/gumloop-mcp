@@ -88,7 +88,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.session import ServerSession
 from mcp.shared.context import RequestContext
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import McpError, AuthError
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
 
@@ -649,6 +649,18 @@ class Server(Generic[LifespanResultT, RequestT]):
                         types.CallToolResult(
                             content=list(content),
                             isError=False,
+                        )
+                    )
+                except AuthError as e:
+                    return types.ServerResult(
+                        types.CallToolResult(
+                            content=[
+                                types.TextContent(
+                                    type="text",
+                                    text=json.dumps(e.details.model_dump()),
+                                )
+                            ],
+                            isError=True,
                         )
                     )
                 except Exception as e:
