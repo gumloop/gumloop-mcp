@@ -660,7 +660,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                                     text=json.dumps(e.details.model_dump()),
                                 )
                             ],
-                            isError=True,
+                            isError=False,
                         )
                     )
                 except Exception as e:
