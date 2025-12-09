@@ -101,14 +101,14 @@ async def test_desktop(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.parametrize("example", find_examples("README.md"), ids=str)
-def test_docs_examples(example: CodeExample, eval_example: EvalExample):
+def test_docs_examples(example: CodeExample, eval_example: EvalExample):  # pragma: no cover
     ruff_ignore: list[str] = ["F841", "I001", "F821"]  # F821: undefined names (snippets lack imports)
 
     # Use project's actual line length of 120
     eval_example.set_config(ruff_ignore=ruff_ignore, target_version="py310", line_length=120)
 
     # Use Ruff for both formatting and linting (skip Black)
-    if eval_example.update_examples:  # pragma: no cover
+    if eval_example.update_examples:
         eval_example.format_ruff(example)
     else:
         eval_example.lint_ruff(example)
