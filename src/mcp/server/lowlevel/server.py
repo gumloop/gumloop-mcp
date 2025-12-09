@@ -110,11 +110,8 @@ CombinationContent: TypeAlias = tuple[UnstructuredContent, StructuredContent]
 request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = contextvars.ContextVar("request_ctx")
 
 
-def filter_tool_definition_for_external_mcp(tool_def):
+def filter_tool_definition_for_external_mcp(tool_def: types.Tool) -> types.Tool:
     """Remove custom guMCP extensions from tool definition for external MCP compatibility"""
-    if tool_def is None:
-        return tool_def
-
     filtered_tool = copy.deepcopy(tool_def)
     custom_fields = ["outputSchema", "requiredScopes", "creditCost"]
 
@@ -125,7 +122,7 @@ def filter_tool_definition_for_external_mcp(tool_def):
     return filtered_tool
 
 
-def filter_deprecated_properties_from_tool(tool_def):
+def filter_deprecated_properties_from_tool(tool_def: types.Tool) -> types.Tool:
     """Remove properties marked as deprecated from tool definition"""
     properties = tool_def.inputSchema.get("properties")
     if not properties:
@@ -143,14 +140,14 @@ def filter_deprecated_properties_from_tool(tool_def):
     return filtered_tool
 
 
-def filter_response_content_for_external_mcp(content_list):
+def filter_response_content_for_external_mcp(content_list: list[types.ContentBlock]) -> list[types.ContentBlock]:
     """Remove creditCost from TextContent responses for external MCP compatibility"""
     if not content_list:
         return content_list
 
-    filtered_content = []
+    filtered_content: list[types.ContentBlock] = []
     for content in content_list:
-        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
+        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):  # pragma: no cover
             filtered_content.append(types.TextContent(type=content.type, text=content.text))
         else:
             filtered_content.append(content)
@@ -202,6 +199,7 @@ class Server(Generic[LifespanResultT, RequestT]):
         self.website_url = website_url
         self.icons = icons
         self.lifespan = lifespan
+        self.config: dict[str, Any] | None = None
         self.request_handlers: dict[type, Callable[..., Awaitable[types.ServerResult]]] = {
             types.PingRequest: _ping_handler,
         }
@@ -505,13 +503,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
 
                 # Filter restricted tools
-                if hasattr(self, "config") and self.config is not None:
+                if self.config is not None:
                     restricted_tools = self.config.get("restricted_tools", [])
                     if restricted_tools:
                         tools = [tool for tool in tools if tool.name not in restricted_tools]
 
-                # Filter for external clients
-                if hasattr(self, "config") and self.config is not None:
+                    # Filter for external clients
                     if self.config.get("external_client", False):
                         tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
 
@@ -590,7 +587,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                             return self._make_error_result(f"Input validation error: {e.message}")
 
                     # Check if tool is restricted
-                    if hasattr(self, "config") and self.config is not None:
+                    if self.config is not None:
                         restricted_tools = self.config.get("restricted_tools", [])
                         if tool_name in restricted_tools:
                             return self._make_error_result(f"Tool '{tool_name}' is restricted and cannot be used")
@@ -634,7 +631,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                     content = list(unstructured_content)
 
                     # Filter for external clients
-                    if hasattr(self, "config") and self.config is not None:
+                    if self.config is not None:
                         if self.config.get("external_client", False):
                             content = filter_response_content_for_external_mcp(content)
 
@@ -650,7 +647,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                     # result
                     return types.ServerResult(
                         types.CallToolResult(
-                            content=content,
+                            content=list(content),
                             structuredContent=maybe_structured_content,
                             isError=False,
                         )
@@ -860,7 +857,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                 return
             except Exception as err:
                 if raise_exceptions:
-                    raise err
+                    raise err  # pragma: no cover
                 response = types.ErrorData(code=0, message=str(err), data=None)
             finally:
                 # Reset the global state after we are done

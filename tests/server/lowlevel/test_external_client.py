@@ -1,5 +1,7 @@
 """Tests for Gumloop external_client config."""
 
+from typing import Any
+
 import pytest
 
 from mcp.server import Server
@@ -14,7 +16,7 @@ async def test_external_client_removes_custom_fields():
     server.config = {"external_client": True}
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         tool = Tool(name="tool", description="Tool", inputSchema={"type": "object", "properties": {}})
         object.__setattr__(tool, "outputSchema", {"type": "object"})
         object.__setattr__(tool, "requiredScopes", ["read"])
@@ -22,7 +24,7 @@ async def test_external_client_removes_custom_fields():
         return [tool]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:  # pragma: no cover
         return [TextContent(type="text", text="ok")]
 
     async with create_connected_server_and_client_session(server) as client:
@@ -41,11 +43,11 @@ async def test_external_client_empty_result_default_message():
     server.config = {"external_client": True, "gummie_id": "123"}
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         return [Tool(name="empty", description="Empty", inputSchema={"type": "object", "properties": {}})]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return []
 
     async with create_connected_server_and_client_session(server) as client:
@@ -53,7 +55,9 @@ async def test_external_client_empty_result_default_message():
 
     assert result.isError is False
     assert len(result.content) == 1
-    assert result.content[0].text == '{"message": "No result found"}'
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert content.text == '{"message": "No result found"}'
 
 
 @pytest.mark.anyio
@@ -63,11 +67,11 @@ async def test_external_client_without_gummie_id_no_default():
     server.config = {"external_client": True}
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         return [Tool(name="empty", description="Empty", inputSchema={"type": "object", "properties": {}})]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return []
 
     async with create_connected_server_and_client_session(server) as client:
@@ -75,3 +79,27 @@ async def test_external_client_without_gummie_id_no_default():
 
     assert result.isError is False
     assert len(result.content) == 0
+
+
+@pytest.mark.anyio
+async def test_external_client_filters_response_content():
+    """external_client=True should filter response content through filter_response_content_for_external_mcp."""
+    server = Server("test")
+    server.config = {"external_client": True}
+
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return [Tool(name="tool", description="Tool", inputSchema={"type": "object", "properties": {}})]
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        return [TextContent(type="text", text="result")]
+
+    async with create_connected_server_and_client_session(server) as client:
+        result = await client.call_tool("tool", {})
+
+    assert result.isError is False
+    assert len(result.content) == 1
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert content.text == "result"

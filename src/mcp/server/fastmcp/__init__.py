@@ -8,4 +8,4 @@ from .server import Context, FastMCP
 from .utilities.types import Audio, Image
 
 __version__ = version("gumloop-mcp")
-__all__ = ["FastMCP", "Context", "Image"]
+__all__ = ["FastMCP", "Context", "Image", "Audio", "Icon"]

@@ -15,7 +15,7 @@ class UrlRedactingFilter(logging.Filter):
     URL_PATTERN = re.compile(r"https?://(?:[a-zA-Z0-9-]+\.)*mcp\.gumloop\.com[^\s]*")
 
     @staticmethod
-    def _redact_url(match):
+    def _redact_url(match: re.Match[str]) -> str:
         """Redact a URL to only show scheme and netloc."""
         url = match.group(0)
         parsed = urlparse(url)
