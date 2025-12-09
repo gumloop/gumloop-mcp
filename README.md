@@ -12,20 +12,24 @@ The main src/ folder should be rebased from `main` of the official repository fr
 
 ### Building the Package
 
-To build the package:
-
-   ```bash
-python -m build --verbose --no-isolation
-   ```
+```bash
+uv build
+```
 
 This will create distribution packages in the `dist/` directory.
 
 ### Deploying to Artifact Registry
 
-To deploy to Google Artifact Registry:
+First, install the publish tools:
 
 ```bash
-python -m twine upload --repository-url https://us-west1-python.pkg.dev/agenthub-dev/gumloop/ dist/* --skip-existing
+uv sync --group publish
+```
+
+Then upload to Artifact Registry:
+
+```bash
+uv run twine upload --repository-url https://us-west1-python.pkg.dev/agenthub-dev/gumloop/ dist/gumloop_mcp-<VERSION>-py3-none-any.whl
 ```
 
 You'll need appropriate authentication credentials configured for the Artifact Registry repository.

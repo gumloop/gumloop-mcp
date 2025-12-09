@@ -57,6 +57,13 @@ dev = [
     "inline-snapshot>=0.23.0",
     "dirty-equals>=0.9.0",
     "coverage[toml]==7.10.7",
+    "pre-commit>=3.0.0",
+]
+publish = [
+    "twine>=6.0.0",
+    "keyring>=25.0.0",
+    "keyrings.google-artifactregistry-auth>=1.1.0",
+    "build>=1.0.0",
 ]
 docs = [
     "mkdocs>=1.6.1",
