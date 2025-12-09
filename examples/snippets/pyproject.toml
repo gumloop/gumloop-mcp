@@ -21,3 +21,7 @@ completion-client = "clients.completion_client:main"
 direct-execution-server = "servers.direct_execution:main"
 display-utilities-client = "clients.display_utilities:main"
 oauth-client = "clients.oauth_client:run"
+<<<<<<< HEAD
+=======
+elicitation-client = "clients.url_elicitation_client:run"
+>>>>>>> 8b984d93a364b8fbf4dde68833f5adb5a95337f3

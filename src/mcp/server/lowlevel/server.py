@@ -67,6 +67,7 @@ messages from the client.
 
 from __future__ import annotations as _annotations
 
+import base64
 import contextvars
 import json
 import logging
@@ -83,6 +84,8 @@ from pydantic import AnyUrl
 from typing_extensions import TypeVar
 
 import mcp.types as types
+from mcp.server.experimental.request_context import Experimental
+from mcp.server.lowlevel.experimental import ExperimentalHandlers
 from mcp.server.lowlevel.func_inspection import create_call_wrapper
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
@@ -91,6 +94,7 @@ from mcp.shared.context import RequestContext
 from mcp.shared.exceptions import McpError, AuthError
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
+from mcp.shared.tool_name_validation import validate_and_warn_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +179,7 @@ class NotificationOptions:
 
 
 @asynccontextmanager
-async def lifespan(
-    _: Server[LifespanResultT, RequestT],
-) -> AsyncIterator[dict[str, Any]]:
+async def lifespan(_: Server[LifespanResultT, RequestT]) -> AsyncIterator[dict[str, Any]]:
     """Default lifespan context manager that does nothing.
 
     Args:
@@ -215,6 +217,7 @@ class Server(Generic[LifespanResultT, RequestT]):
         }
         self.notification_handlers: dict[type, Callable[..., Awaitable[None]]] = {}
         self._tool_cache: dict[str, types.Tool] = {}
+        self._experimental_handlers: ExperimentalHandlers | None = None
         logger.debug("Initializing server %r", name)
 
     def create_initialization_options(
@@ -229,10 +232,10 @@ class Server(Generic[LifespanResultT, RequestT]):
                 from importlib.metadata import version
 
                 return version(package)
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass
 
-            return "unknown"
+            return "unknown"  # pragma: no cover
 
         return InitializationOptions(
             server_name=self.name,
@@ -277,14 +280,14 @@ class Server(Generic[LifespanResultT, RequestT]):
             )
 
         # Set logging capabilities if handler exists
-        if types.SetLevelRequest in self.request_handlers:
+        if types.SetLevelRequest in self.request_handlers:  # pragma: no cover
             logging_capability = types.LoggingCapability()
 
         # Set completions capabilities if handler exists
         if types.CompleteRequest in self.request_handlers:
             completions_capability = types.CompletionsCapability()
 
-        return types.ServerCapabilities(
+        capabilities = types.ServerCapabilities(
             prompts=prompts_capability,
             resources=resources_capability,
             tools=tools_capability,
@@ -292,6 +295,9 @@ class Server(Generic[LifespanResultT, RequestT]):
             experimental=experimental_capabilities,
             completions=completions_capability,
         )
+        if self._experimental_handlers:
+            self._experimental_handlers.update_capabilities(capabilities)
+        return capabilities
 
     @property
     def request_context(
@@ -300,14 +306,22 @@ class Server(Generic[LifespanResultT, RequestT]):
         """If called outside of a request context, this will raise a LookupError."""
         return request_ctx.get()
 
+    @property
+    def experimental(self) -> ExperimentalHandlers:
+        """Experimental APIs for tasks and other features.
+
+        WARNING: These APIs are experimental and may change without notice.
+        """
+
+        # We create this inline so we only add these capabilities _if_ they're actually used
+        if self._experimental_handlers is None:
+            self._experimental_handlers = ExperimentalHandlers(self, self.request_handlers, self.notification_handlers)
+        return self._experimental_handlers
+
     def list_prompts(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Prompt]]]
-                | Callable[
-                    [types.ListPromptsRequest], Awaitable[types.ListPromptsResult]
-                ]
-            ),
+            func: Callable[[], Awaitable[list[types.Prompt]]]
+            | Callable[[types.ListPromptsRequest], Awaitable[types.ListPromptsResult]],
         ):
             logger.debug("Registering handler for PromptListRequest")
 
@@ -346,12 +360,8 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def list_resources(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Resource]]]
-                | Callable[
-                    [types.ListResourcesRequest], Awaitable[types.ListResourcesResult]
-                ]
-            ),
+            func: Callable[[], Awaitable[list[types.Resource]]]
+            | Callable[[types.ListResourcesRequest], Awaitable[types.ListResourcesResult]],
         ):
             logger.debug("Registering handler for ListResourcesRequest")
 
@@ -364,9 +374,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                     return types.ServerResult(result)
                 else:
                     # Old style returns list[Resource]
-                    return types.ServerResult(
-                        types.ListResourcesResult(resources=result)
-                    )
+                    return types.ServerResult(types.ListResourcesResult(resources=result))
 
             self.request_handlers[types.ListResourcesRequest] = handler
             return func
@@ -407,9 +415,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                                 text=data,
                                 mimeType=mime_type or "text/plain",
                             )
-                        case bytes() as data:
-                            import base64
-
+                        case bytes() as data:  # pragma: no cover
                             return types.BlobResourceContents(
                                 uri=req.params.uri,
                                 blob=base64.b64encode(data).decode(),
@@ -417,7 +423,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                             )
 
                 match result:
-                    case str() | bytes() as data:
+                    case str() | bytes() as data:  # pragma: no cover
                         warnings.warn(
                             "Returning str or bytes from read_resource is deprecated. "
                             "Use Iterable[ReadResourceContents] instead.",
@@ -435,12 +441,10 @@ class Server(Generic[LifespanResultT, RequestT]):
                                 contents=contents_list,
                             )
                         )
-                    case _:
-                        raise ValueError(
-                            f"Unexpected return type from read_resource: {type(result)}"
-                        )
+                    case _:  # pragma: no cover
+                        raise ValueError(f"Unexpected return type from read_resource: {type(result)}")
 
-                return types.ServerResult(
+                return types.ServerResult(  # pragma: no cover
                     types.ReadResourceResult(
                         contents=[content],
                     )
@@ -451,7 +455,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def set_logging_level(self):
+    def set_logging_level(self):  # pragma: no cover
         def decorator(func: Callable[[types.LoggingLevel], Awaitable[None]]):
             logger.debug("Registering handler for SetLevelRequest")
 
@@ -464,7 +468,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def subscribe_resource(self):
+    def subscribe_resource(self):  # pragma: no cover
         def decorator(func: Callable[[AnyUrl], Awaitable[None]]):
             logger.debug("Registering handler for SubscribeRequest")
 
@@ -477,7 +481,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def unsubscribe_resource(self):
+    def unsubscribe_resource(self):  # pragma: no cover
         def decorator(func: Callable[[AnyUrl], Awaitable[None]]):
             logger.debug("Registering handler for UnsubscribeRequest")
 
@@ -492,13 +496,31 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def list_tools(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Tool]]]
-                | Callable[[types.ListToolsRequest], Awaitable[types.ListToolsResult]]
-            ),
+            func: Callable[[], Awaitable[list[types.Tool]]]
+            | Callable[[types.ListToolsRequest], Awaitable[types.ListToolsResult]],
         ):
             logger.debug("Registering handler for ListToolsRequest")
 
+            wrapper = create_call_wrapper(func, types.ListToolsRequest)
+
+            async def handler(req: types.ListToolsRequest):
+                result = await wrapper(req)
+
+                # Handle both old style (list[Tool]) and new style (ListToolsResult)
+                if isinstance(result, types.ListToolsResult):  # pragma: no cover
+                    # Refresh the tool cache with returned tools
+                    for tool in result.tools:
+                        validate_and_warn_tool_name(tool.name)
+                        self._tool_cache[tool.name] = tool
+                    return types.ServerResult(result)
+                else:
+                    # Old style returns list[Tool]
+                    # Clear and refresh the entire tool cache
+                    self._tool_cache.clear()
+                    for tool in result:
+                        validate_and_warn_tool_name(tool.name)
+                        self._tool_cache[tool.name] = tool
+                    return types.ServerResult(types.ListToolsResult(tools=result))
             wrapper = create_call_wrapper(func, types.ListToolsRequest)
 
             async def handler(req: types.ListToolsRequest):
@@ -592,7 +614,13 @@ class Server(Generic[LifespanResultT, RequestT]):
         def decorator(
             func: Callable[
                 ...,
-                Awaitable[UnstructuredContent | StructuredContent | CombinationContent],
+                Awaitable[
+                    UnstructuredContent
+                    | StructuredContent
+                    | CombinationContent
+                    | types.CallToolResult
+                    | types.CreateTaskResult
+                ],
             ],
         ):
             logger.debug("Registering handler for CallToolRequest")
@@ -753,6 +781,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                 )
             )
 
+            # Configure task support for this session if enabled
+            task_support = self._experimental_handlers.task_support if self._experimental_handlers else None
+            if task_support is not None:
+                task_support.configure_session(session)
+                await stack.enter_async_context(task_support.run())
+
             async with anyio.create_task_group() as tg:
                 async for message in session.incoming_messages:
                     logger.debug("Received message: %s", message)
@@ -797,37 +831,54 @@ class Server(Generic[LifespanResultT, RequestT]):
     async def _handle_request(
         self,
         message: RequestResponder[types.ClientRequest, types.ServerResult],
-        req: Any,
+        req: types.ClientRequestType,
         session: ServerSession,
         lifespan_context: LifespanResultT,
         raise_exceptions: bool,
     ):
         logger.info("Processing request of type %s", type(req).__name__)
-        if handler := self.request_handlers.get(type(req)):  # type: ignore
+
+        if handler := self.request_handlers.get(type(req)):
             logger.debug("Dispatching request of type %s", type(req).__name__)
 
             token = None
             try:
-                # Extract request context from message metadata
+                # Extract request context and close_sse_stream from message metadata
                 request_data = None
                 if message.message_metadata is not None and isinstance(
                     message.message_metadata, ServerMessageMetadata
                 ):
                     request_data = message.message_metadata.request_context
+                    close_sse_stream_cb = message.message_metadata.close_sse_stream
+                    close_standalone_sse_stream_cb = message.message_metadata.close_standalone_sse_stream
 
                 # Set our global state that can be retrieved via
                 # app.get_request_context()
+                client_capabilities = session.client_params.capabilities if session.client_params else None
+                task_support = self._experimental_handlers.task_support if self._experimental_handlers else None
+                # Get task metadata from request params if present
+                task_metadata = None
+                if hasattr(req, "params") and req.params is not None:
+                    task_metadata = getattr(req.params, "task", None)
                 token = request_ctx.set(
                     RequestContext(
                         message.request_id,
                         message.request_meta,
                         session,
                         lifespan_context,
+                        Experimental(
+                            task_metadata=task_metadata,
+                            _client_capabilities=client_capabilities,
+                            _session=session,
+                            _task_support=task_support,
+                        ),
                         request=request_data,
+                        close_sse_stream=close_sse_stream_cb,
+                        close_standalone_sse_stream=close_standalone_sse_stream_cb,
                     )
                 )
                 response = await handler(req)
-            except McpError as err:
+            except McpError as err:  # pragma: no cover
                 response = err.error
             except anyio.get_cancelled_exc_class():
                 logger.info(
@@ -841,11 +892,11 @@ class Server(Generic[LifespanResultT, RequestT]):
                 response = types.ErrorData(code=0, message=str(err), data=None)
             finally:
                 # Reset the global state after we are done
-                if token is not None:
+                if token is not None:  # pragma: no branch
                     request_ctx.reset(token)
 
             await message.respond(response)
-        else:
+        else:  # pragma: no cover
             await message.respond(
                 types.ErrorData(
                     code=types.METHOD_NOT_FOUND,
@@ -861,7 +912,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             try:
                 await handler(notify)
-            except Exception:
+            except Exception:  # pragma: no cover
                 logger.exception("Uncaught exception in notification handler")
 
 
