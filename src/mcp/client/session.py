@@ -402,13 +402,10 @@ class ClientSession(
         else:
             logger.warning(f"Tool {name} not listed by server, cannot validate any structured content")
 
-        if output_schema is not None:
+        # Only validate if structured content is actually provided
+        if output_schema is not None and result.structuredContent is not None:
             from jsonschema import SchemaError, ValidationError, validate
 
-            if result.structuredContent is None:
-                raise RuntimeError(
-                    f"Tool {name} has an output schema but did not return structured content"
-                )  # pragma: no cover
             try:
                 validate(result.structuredContent, output_schema)
             except ValidationError as e:

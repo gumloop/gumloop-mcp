@@ -213,12 +213,16 @@ async def test_both_content_and_dict_without_output_schema():
 
 
 @pytest.mark.anyio
-async def test_content_only_with_output_schema_error():
-    """Test error when outputSchema is defined but only content is returned."""
+async def test_content_only_with_output_schema_allowed():
+    """Test that unstructured content is allowed when outputSchema is defined.
+
+    Tools can define outputSchema and return either unstructured content
+    or structured content - validation only runs when structured content is provided.
+    """
     tools = [
         Tool(
             name="structured_tool",
-            description="Tool expecting structured output",
+            description="Tool with output schema",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -234,21 +238,22 @@ async def test_content_only_with_output_schema_error():
     ]
 
     async def call_tool_handler(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        # This returns only content, but outputSchema expects structured data
-        return [TextContent(type="text", text="This is not structured")]
+        # Returns only content - allowed even with outputSchema defined
+        return [TextContent(type="text", text="This is unstructured content")]
 
     async def test_callback(client_session: ClientSession) -> CallToolResult:
         return await client_session.call_tool("structured_tool", {})
 
     result = await run_tool_test(tools, call_tool_handler, test_callback)
 
-    # Verify error
+    # Verify success - unstructured content is allowed
     assert result is not None
-    assert result.isError
+    assert not result.isError
     assert len(result.content) == 1
     assert result.content[0].type == "text"
     assert isinstance(result.content[0], TextContent)
-    assert "Output validation error: outputSchema defined but no structured output returned" in result.content[0].text
+    assert result.content[0].text == "This is unstructured content"
+    assert result.structuredContent is None
 
 
 @pytest.mark.anyio

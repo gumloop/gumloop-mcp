@@ -613,20 +613,15 @@ class Server(Generic[LifespanResultT, RequestT]):
                     else:  # pragma: no cover
                         return self._make_error_result(f"Unexpected return type from tool: {type(results).__name__}")
 
-                    # output validation
-                    if tool and tool.outputSchema is not None:
-                        if maybe_structured_content is None:
-                            return self._make_error_result(
-                                "Output validation error: outputSchema defined but no structured output returned"
+                    # output validation (only validate if structured content is provided)
+                    if tool and tool.outputSchema is not None and maybe_structured_content is not None:
+                        try:
+                            jsonschema.validate(
+                                instance=maybe_structured_content,
+                                schema=tool.outputSchema,
                             )
-                        else:
-                            try:
-                                jsonschema.validate(
-                                    instance=maybe_structured_content,
-                                    schema=tool.outputSchema,
-                                )
-                            except jsonschema.ValidationError as e:
-                                return self._make_error_result(f"Output validation error: {e.message}")
+                        except jsonschema.ValidationError as e:
+                            return self._make_error_result(f"Output validation error: {e.message}")
 
                     content = list(unstructured_content)
 
