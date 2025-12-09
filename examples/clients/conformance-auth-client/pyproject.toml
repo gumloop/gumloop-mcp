@@ -5,7 +5,7 @@ description = "OAuth conformance test client for MCP"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Anthropic" }]
-keywords = ["mcp", "oauth", "client", "auth", "conformance", "testing"]
+keywords = ["gumloop-mcp", "oauth", "client", "auth", "conformance", "testing"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
 ]
-dependencies = ["mcp", "httpx>=0.28.1"]
+dependencies = ["gumloop-mcp", "httpx>=0.28.1"]
 
 [project.scripts]
 mcp-conformance-auth-client = "mcp_conformance_auth_client:main"

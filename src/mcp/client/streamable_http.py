@@ -51,7 +51,7 @@ LAST_EVENT_ID = "last-event-id"
 DEFAULT_RECONNECTION_DELAY_MS = 1000  # 1 second fallback when server doesn't provide retry
 MAX_RECONNECTION_ATTEMPTS = 2  # Max retry attempts before giving up
 CONTENT_TYPE = "content-type"
-ACCEPT = "Accept"
+ACCEPT = "accept"
 
 
 JSON = "application/json"

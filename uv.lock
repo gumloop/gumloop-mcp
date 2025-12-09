@@ -4,7 +4,7 @@ requires-python = ">=3.10"
 
 [manifest]
 members = [
-    "mcp",
+    "gumloop-mcp",
     "mcp-conformance-auth-client",
     "mcp-everything-server",
     "mcp-simple-auth",
@@ -566,6 +566,104 @@ wheels = [
 ]
 
 [[package]]
+name = "gumloop-mcp"
+version = "0.1.14"
+source = { editable = "." }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "jsonschema" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
+]
+
+[package.optional-dependencies]
+cli = [
+    { name = "python-dotenv" },
+    { name = "typer" },
+]
+rich = [
+    { name = "rich" },
+]
+ws = [
+    { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "coverage", extra = ["toml"] },
+    { name = "dirty-equals" },
+    { name = "inline-snapshot" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-examples" },
+    { name = "pytest-flakefinder" },
+    { name = "pytest-pretty" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "trio" },
+]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-glightbox" },
+    { name = "mkdocs-material", extra = ["imaging"] },
+    { name = "mkdocstrings-python" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.5" },
+    { name = "httpx", specifier = ">=0.27.1" },
+    { name = "httpx-sse", specifier = ">=0.4" },
+    { name = "jsonschema", specifier = ">=4.20.0" },
+    { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.5.2" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
+    { name = "python-dotenv", marker = "extra == 'cli'", specifier = ">=1.0.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=310" },
+    { name = "rich", marker = "extra == 'rich'", specifier = ">=13.9.4" },
+    { name = "sse-starlette", specifier = ">=1.6.1" },
+    { name = "starlette", specifier = ">=0.27" },
+    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16.0" },
+    { name = "typing-extensions", specifier = ">=4.9.0" },
+    { name = "typing-inspection", specifier = ">=0.4.1" },
+    { name = "uvicorn", marker = "sys_platform != 'emscripten'", specifier = ">=0.31.1" },
+    { name = "websockets", marker = "extra == 'ws'", specifier = ">=15.0.1" },
+]
+provides-extras = ["rich", "cli", "ws"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "coverage", extras = ["toml"], specifier = "==7.10.7" },
+    { name = "dirty-equals", specifier = ">=0.9.0" },
+    { name = "inline-snapshot", specifier = ">=0.23.0" },
+    { name = "pyright", specifier = ">=1.1.400" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-examples", specifier = ">=0.0.14" },
+    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
+    { name = "pytest-pretty", specifier = ">=1.2.0" },
+    { name = "pytest-xdist", specifier = ">=3.6.1" },
+    { name = "ruff", specifier = ">=0.8.5" },
+    { name = "trio", specifier = ">=0.26.2" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-glightbox", specifier = ">=0.4.0" },
+    { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.5.45" },
+    { name = "mkdocstrings-python", specifier = ">=1.12.2" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -764,109 +862,12 @@ wheels = [
 ]
 
 [[package]]
-name = "mcp"
-source = { editable = "." }
-dependencies = [
-    { name = "anyio" },
-    { name = "httpx" },
-    { name = "httpx-sse" },
-    { name = "jsonschema" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "python-multipart" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "sse-starlette" },
-    { name = "starlette" },
-    { name = "typing-extensions" },
-    { name = "typing-inspection" },
-    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
-]
-
-[package.optional-dependencies]
-cli = [
-    { name = "python-dotenv" },
-    { name = "typer" },
-]
-rich = [
-    { name = "rich" },
-]
-ws = [
-    { name = "websockets" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "coverage", extra = ["toml"] },
-    { name = "dirty-equals" },
-    { name = "inline-snapshot" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-examples" },
-    { name = "pytest-flakefinder" },
-    { name = "pytest-pretty" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "trio" },
-]
-docs = [
-    { name = "mkdocs" },
-    { name = "mkdocs-glightbox" },
-    { name = "mkdocs-material", extra = ["imaging"] },
-    { name = "mkdocstrings-python" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.5" },
-    { name = "httpx", specifier = ">=0.27.1" },
-    { name = "httpx-sse", specifier = ">=0.4" },
-    { name = "jsonschema", specifier = ">=4.20.0" },
-    { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
-    { name = "pydantic-settings", specifier = ">=2.5.2" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
-    { name = "python-dotenv", marker = "extra == 'cli'", specifier = ">=1.0.0" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=310" },
-    { name = "rich", marker = "extra == 'rich'", specifier = ">=13.9.4" },
-    { name = "sse-starlette", specifier = ">=1.6.1" },
-    { name = "starlette", specifier = ">=0.27" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16.0" },
-    { name = "typing-extensions", specifier = ">=4.9.0" },
-    { name = "typing-inspection", specifier = ">=0.4.1" },
-    { name = "uvicorn", marker = "sys_platform != 'emscripten'", specifier = ">=0.31.1" },
-    { name = "websockets", marker = "extra == 'ws'", specifier = ">=15.0.1" },
-]
-provides-extras = ["cli", "rich", "ws"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "coverage", extras = ["toml"], specifier = "==7.10.7" },
-    { name = "dirty-equals", specifier = ">=0.9.0" },
-    { name = "inline-snapshot", specifier = ">=0.23.0" },
-    { name = "pyright", specifier = ">=1.1.400" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-examples", specifier = ">=0.0.14" },
-    { name = "pytest-flakefinder", specifier = ">=1.1.0" },
-    { name = "pytest-pretty", specifier = ">=1.2.0" },
-    { name = "pytest-xdist", specifier = ">=3.6.1" },
-    { name = "ruff", specifier = ">=0.8.5" },
-    { name = "trio", specifier = ">=0.26.2" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-glightbox", specifier = ">=0.4.0" },
-    { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.5.45" },
-    { name = "mkdocstrings-python", specifier = ">=1.12.2" },
-]
-
-[[package]]
 name = "mcp-conformance-auth-client"
 version = "0.1.0"
 source = { editable = "examples/clients/conformance-auth-client" }
 dependencies = [
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -878,8 +879,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -896,8 +897,8 @@ source = { editable = "examples/servers/everything-server" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -913,8 +914,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -933,8 +934,8 @@ source = { editable = "examples/servers/simple-auth" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sse-starlette" },
@@ -952,8 +953,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.5.2" },
     { name = "sse-starlette", specifier = ">=1.6.1" },
@@ -973,7 +974,7 @@ version = "0.1.0"
 source = { editable = "examples/clients/simple-auth-client" }
 dependencies = [
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.dev-dependencies]
@@ -986,7 +987,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.2.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1001,7 +1002,7 @@ name = "mcp-simple-chatbot"
 version = "0.1.0"
 source = { editable = "examples/clients/simple-chatbot" }
 dependencies = [
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "uvicorn" },
@@ -1016,7 +1017,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "uvicorn", specifier = ">=0.32.1" },
@@ -1036,8 +1037,8 @@ source = { editable = "examples/servers/simple-pagination" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1051,8 +1052,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1069,8 +1070,8 @@ source = { editable = "examples/servers/simple-prompt" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1084,8 +1085,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1102,8 +1103,8 @@ source = { editable = "examples/servers/simple-resource" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1117,8 +1118,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1135,8 +1136,8 @@ source = { editable = "examples/servers/simple-streamablehttp" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1152,8 +1153,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1172,8 +1173,8 @@ source = { editable = "examples/servers/simple-streamablehttp-stateless" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1189,8 +1190,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1209,7 +1210,7 @@ source = { editable = "examples/servers/simple-task" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1224,7 +1225,7 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1241,7 +1242,7 @@ version = "0.1.0"
 source = { editable = "examples/clients/simple-task-client" }
 dependencies = [
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1253,7 +1254,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1269,7 +1270,7 @@ source = { editable = "examples/servers/simple-task-interactive" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1284,7 +1285,7 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1301,7 +1302,7 @@ version = "0.1.0"
 source = { editable = "examples/clients/simple-task-interactive-client" }
 dependencies = [
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1313,7 +1314,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1329,8 +1330,8 @@ source = { editable = "examples/servers/simple-tool" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1344,8 +1345,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1360,11 +1361,11 @@ name = "mcp-snippets"
 version = "0.1.0"
 source = { editable = "examples/snippets" }
 dependencies = [
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", editable = "." }]
+requires-dist = [{ name = "gumloop-mcp", editable = "." }]
 
 [[package]]
 name = "mcp-sse-polling-client"
@@ -1372,7 +1373,7 @@ version = "0.1.0"
 source = { editable = "examples/clients/sse-polling-client" }
 dependencies = [
     { name = "click" },
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1385,7 +1386,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.2.0" },
-    { name = "mcp", editable = "." },
+    { name = "gumloop-mcp", editable = "." },
 ]
 
 [package.metadata.requires-dev]
@@ -1402,8 +1403,8 @@ source = { editable = "examples/servers/sse-polling-demo" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
+    { name = "gumloop-mcp" },
     { name = "httpx" },
-    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1419,8 +1420,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "click", specifier = ">=8.2.0" },
+    { name = "gumloop-mcp", editable = "." },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", editable = "." },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -1437,11 +1438,11 @@ name = "mcp-structured-output-lowlevel"
 version = "0.1.0"
 source = { virtual = "examples/servers/structured-output-lowlevel" }
 dependencies = [
-    { name = "mcp" },
+    { name = "gumloop-mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", editable = "." }]
+requires-dist = [{ name = "gumloop-mcp", editable = "." }]
 
 [[package]]
 name = "mdurl"

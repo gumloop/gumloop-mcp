@@ -5,9 +5,9 @@ description = "Demo server showing SSE polling with close_sse_stream for long-ru
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Anthropic, PBC." }]
-keywords = ["mcp", "sse", "polling", "streamable", "http"]
+keywords = ["gumloop-mcp", "sse", "polling", "streamable", "http"]
 license = { text = "MIT" }
-dependencies = ["anyio>=4.5", "click>=8.2.0", "httpx>=0.27", "mcp", "starlette", "uvicorn"]
+dependencies = ["anyio>=4.5", "click>=8.2.0", "httpx>=0.27", "gumloop-mcp", "starlette", "uvicorn"]
 
 [project.scripts]
 mcp-sse-polling-demo = "mcp_sse_polling_demo.server:main"

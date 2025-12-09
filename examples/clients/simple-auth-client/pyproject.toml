@@ -5,7 +5,7 @@ description = "A simple OAuth client for the MCP simple-auth server"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Anthropic" }]
-keywords = ["mcp", "oauth", "client", "auth"]
+keywords = ["gumloop-mcp", "oauth", "client", "auth"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,14 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
 ]
-<<<<<<< HEAD
-dependencies = [
-    "click>=8.2.0",
-    "mcp>=1.0.0",
-]
-=======
-dependencies = ["click>=8.2.0", "mcp"]
->>>>>>> 8b984d93a364b8fbf4dde68833f5adb5a95337f3
+dependencies = ["click>=8.2.0", "gumloop-mcp"]
 
 [project.scripts]
 mcp-simple-auth-client = "mcp_simple_auth_client.main:cli"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from mcp.types import URL_ELICITATION_REQUIRED, ElicitRequestURLParams, ErrorData
+from mcp.types import URL_ELICITATION_REQUIRED, ElicitRequestURLParams, ErrorData, AuthErrorData
 
 
 class McpError(Exception):
@@ -69,3 +69,13 @@ class UrlElicitationRequiredError(McpError):
         raw_elicitations = cast(list[dict[str, Any]], data.get("elicitations", []))
         elicitations = [ElicitRequestURLParams.model_validate(e) for e in raw_elicitations]
         return cls(elicitations, error.message)
+
+
+class AuthError(Exception):
+    """Exception type raised for authentication and authorization failures."""
+
+    details: AuthErrorData
+
+    def __init__(self, details: AuthErrorData):
+        super().__init__(details.message)
+        self.details = details

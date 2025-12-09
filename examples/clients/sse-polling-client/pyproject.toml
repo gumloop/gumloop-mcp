@@ -5,9 +5,9 @@ description = "Demo client for SSE polling with auto-reconnect"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Anthropic, PBC." }]
-keywords = ["mcp", "sse", "polling", "client"]
+keywords = ["gumloop-mcp", "sse", "polling", "client"]
 license = { text = "MIT" }
-dependencies = ["click>=8.2.0", "mcp"]
+dependencies = ["click>=8.2.0", "gumloop-mcp"]
 
 [project.scripts]
 mcp-sse-polling-client = "mcp_sse_polling_client.main:main"

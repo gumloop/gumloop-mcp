@@ -5,7 +5,7 @@ description = "A simple MCP client demonstrating interactive task responses"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Anthropic, PBC." }]
-keywords = ["mcp", "llm", "tasks", "client", "elicitation", "sampling"]
+keywords = ["gumloop-mcp", "llm", "tasks", "client", "elicitation", "sampling"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
 ]
-dependencies = ["click>=8.0", "mcp"]
+dependencies = ["click>=8.0", "gumloop-mcp"]
 
 [project.scripts]
 mcp-simple-task-interactive-client = "mcp_simple_task_interactive_client.main:main"

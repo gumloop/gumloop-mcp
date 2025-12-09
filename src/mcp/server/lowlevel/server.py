@@ -122,7 +122,7 @@ def filter_tool_definition_for_external_mcp(tool_def):
 
     for field in custom_fields:
         if hasattr(filtered_tool, field):
-            delattr(filtered_tool, field)
+            setattr(filtered_tool, field, None)
 
     return filtered_tool
 
@@ -508,30 +508,14 @@ class Server(Generic[LifespanResultT, RequestT]):
 
                 # Handle both old style (list[Tool]) and new style (ListToolsResult)
                 if isinstance(result, types.ListToolsResult):  # pragma: no cover
-                    # Refresh the tool cache with returned tools
-                    for tool in result.tools:
-                        validate_and_warn_tool_name(tool.name)
-                        self._tool_cache[tool.name] = tool
-                    return types.ServerResult(result)
-                else:
-                    # Old style returns list[Tool]
-                    # Clear and refresh the entire tool cache
-                    self._tool_cache.clear()
-                    for tool in result:
-                        validate_and_warn_tool_name(tool.name)
-                        self._tool_cache[tool.name] = tool
-                    return types.ServerResult(types.ListToolsResult(tools=result))
-            wrapper = create_call_wrapper(func, types.ListToolsRequest)
-
-            async def handler(req: types.ListToolsRequest):
-                result = await wrapper(req)
-
-                # Handle both old style (list[Tool]) and new style (ListToolsResult)
-                if isinstance(result, types.ListToolsResult):
                     tools = result.tools
                 else:
                     # Old style returns list[Tool]
-                    tools = result
+                    tools = list(result)
+
+                # Validate tool names
+                for tool in tools:
+                    validate_and_warn_tool_name(tool.name)
 
                 # Filter deprecated tools
                 tools = [
@@ -652,30 +636,82 @@ class Server(Generic[LifespanResultT, RequestT]):
 
                     # tool call
                     results = await func(tool_name, arguments)
-                    content = list(results)
+
+                    # output normalization
+                    unstructured_content: UnstructuredContent
+                    maybe_structured_content: StructuredContent | None
+                    if isinstance(results, types.CallToolResult):
+                        return types.ServerResult(results)
+                    elif isinstance(results, types.CreateTaskResult):
+                        return types.ServerResult(results)
+                    elif isinstance(results, tuple) and len(results) == 2:
+                        unstructured_content, maybe_structured_content = cast(
+                            CombinationContent, results
+                        )
+                    elif isinstance(results, dict):
+                        maybe_structured_content = cast(StructuredContent, results)
+                        unstructured_content = [
+                            types.TextContent(
+                                type="text", text=json.dumps(results, indent=2)
+                            )
+                        ]
+                    elif hasattr(results, "__iter__"):  # pragma: no cover
+                        unstructured_content = cast(UnstructuredContent, results)
+                        maybe_structured_content = None
+                    else:  # pragma: no cover
+                        return self._make_error_result(
+                            f"Unexpected return type from tool: {type(results).__name__}"
+                        )
+
+                    # output validation
+                    if tool and tool.outputSchema is not None:
+                        if maybe_structured_content is None:
+                            return self._make_error_result(
+                                "Output validation error: outputSchema defined but no structured output returned"
+                            )
+                        else:
+                            try:
+                                jsonschema.validate(
+                                    instance=maybe_structured_content,
+                                    schema=tool.outputSchema,
+                                )
+                            except jsonschema.ValidationError as e:
+                                return self._make_error_result(
+                                    f"Output validation error: {e.message}"
+                                )
+
+                    content = list(unstructured_content)
 
                     # Filter for external clients
                     if hasattr(self, "config") and self.config is not None:
                         if self.config.get("external_client", False):
                             content = filter_response_content_for_external_mcp(content)
-                            
+
                             # Add default message for empty results when gummie_id exists
                             if not content and self.config.get("gummie_id"):
                                 content = [
-                                    types.TextContent(type="text", text='{"message": "No result found"}')
+                                    types.TextContent(
+                                        type="text", text='{"message": "No result found"}'
+                                    )
                                 ]
-                        
+
                         # Aggregate all results into a single content item
-                        if self.config.get("aggregate_tool_call_results", False) and content:
+                        if (
+                            self.config.get("aggregate_tool_call_results", False)
+                            and content
+                        ):
                             serialized_content = [item.model_dump() for item in content]
                             content = [
-                                types.TextContent(type="text", text=json.dumps(serialized_content))
+                                types.TextContent(
+                                    type="text", text=json.dumps(serialized_content)
+                                )
                             ]
 
                     # result
                     return types.ServerResult(
                         types.CallToolResult(
-                            content=list(content),
+                            content=content,
+                            structuredContent=maybe_structured_content,
                             isError=False,
                         )
                     )
@@ -811,8 +847,7 @@ class Server(Generic[LifespanResultT, RequestT]):
         raise_exceptions: bool = False,
     ):
         with warnings.catch_warnings(record=True) as w:
-            # TODO(Marcelo): We should be checking if message is Exception here.
-            match message:  # type: ignore[reportMatchNotExhaustive]
+            match message:
                 case RequestResponder(
                     request=types.ClientRequest(root=req)
                 ) as responder:
@@ -822,8 +857,17 @@ class Server(Generic[LifespanResultT, RequestT]):
                         )
                 case types.ClientNotification(root=notify):
                     await self._handle_notification(notify)
+                case Exception():  # pragma: no cover
+                    logger.error(f"Received exception from stream: {message}")
+                    await session.send_log_message(
+                        level="error",
+                        data="Internal Server Error",
+                        logger="mcp.server.exception_handler",
+                    )
+                    if raise_exceptions:
+                        raise message
 
-            for warning in w:
+            for warning in w:  # pragma: no cover
                 logger.info(
                     "Warning: %s: %s", warning.category.__name__, warning.message
                 )
@@ -845,9 +889,11 @@ class Server(Generic[LifespanResultT, RequestT]):
             try:
                 # Extract request context and close_sse_stream from message metadata
                 request_data = None
+                close_sse_stream_cb = None
+                close_standalone_sse_stream_cb = None
                 if message.message_metadata is not None and isinstance(
                     message.message_metadata, ServerMessageMetadata
-                ):
+                ):  # pragma: no cover
                     request_data = message.message_metadata.request_context
                     close_sse_stream_cb = message.message_metadata.close_sse_stream
                     close_standalone_sse_stream_cb = message.message_metadata.close_standalone_sse_stream
