@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from mcp.types import URL_ELICITATION_REQUIRED, ElicitRequestURLParams, ErrorData, AuthErrorData
+from mcp.types import URL_ELICITATION_REQUIRED, AuthErrorData, ElicitRequestURLParams, ErrorData
 
 
 class McpError(Exception):

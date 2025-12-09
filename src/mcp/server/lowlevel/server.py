@@ -69,10 +69,10 @@ from __future__ import annotations as _annotations
 
 import base64
 import contextvars
+import copy
 import json
 import logging
 import warnings
-import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Any, Generic, TypeAlias, cast
@@ -91,7 +91,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.session import ServerSession
 from mcp.shared.context import RequestContext
-from mcp.shared.exceptions import McpError, AuthError
+from mcp.shared.exceptions import AuthError, McpError
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
 from mcp.shared.tool_name_validation import validate_and_warn_tool_name
@@ -107,9 +107,7 @@ UnstructuredContent: TypeAlias = Iterable[types.ContentBlock]
 CombinationContent: TypeAlias = tuple[UnstructuredContent, StructuredContent]
 
 # This will be properly typed in each Server instance's context
-request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = (
-    contextvars.ContextVar("request_ctx")
-)
+request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = contextvars.ContextVar("request_ctx")
 
 
 def filter_tool_definition_for_external_mcp(tool_def):
@@ -129,18 +127,14 @@ def filter_tool_definition_for_external_mcp(tool_def):
 
 def filter_deprecated_properties_from_tool(tool_def):
     """Remove properties marked as deprecated from tool definition"""
-    properties = tool_def.inputSchema["properties"]
+    properties = tool_def.inputSchema.get("properties")
+    if not properties:
+        return tool_def
 
-    # Find deprecated properties
-    deprecated_props = {
-        name for name, prop in properties.items() if prop.get("is_deprecated") is True
-    }
-
-    # Return original if no deprecated properties found
+    deprecated_props = {name for name, prop in properties.items() if prop.get("is_deprecated") is True}
     if not deprecated_props:
         return tool_def
 
-    # Create filtered tool
     filtered_tool = copy.deepcopy(tool_def)
     filtered_tool.inputSchema["properties"] = {
         name: prop for name, prop in properties.items() if name not in deprecated_props
@@ -157,9 +151,7 @@ def filter_response_content_for_external_mcp(content_list):
     filtered_content = []
     for content in content_list:
         if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
-            filtered_content.append(
-                types.TextContent(type=content.type, text=content.text)
-            )
+            filtered_content.append(types.TextContent(type=content.type, text=content.text))
         else:
             filtered_content.append(content)
 
@@ -210,9 +202,7 @@ class Server(Generic[LifespanResultT, RequestT]):
         self.website_url = website_url
         self.icons = icons
         self.lifespan = lifespan
-        self.request_handlers: dict[
-            type, Callable[..., Awaitable[types.ServerResult]]
-        ] = {
+        self.request_handlers: dict[type, Callable[..., Awaitable[types.ServerResult]]] = {
             types.PingRequest: _ping_handler,
         }
         self.notification_handlers: dict[type, Callable[..., Awaitable[None]]] = {}
@@ -263,9 +253,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set prompt capabilities if handler exists
         if types.ListPromptsRequest in self.request_handlers:
-            prompts_capability = types.PromptsCapability(
-                listChanged=notification_options.prompts_changed
-            )
+            prompts_capability = types.PromptsCapability(listChanged=notification_options.prompts_changed)
 
         # Set resource capabilities if handler exists
         if types.ListResourcesRequest in self.request_handlers:
@@ -275,9 +263,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set tool capabilities if handler exists
         if types.ListToolsRequest in self.request_handlers:
-            tools_capability = types.ToolsCapability(
-                listChanged=notification_options.tools_changed
-            )
+            tools_capability = types.ToolsCapability(listChanged=notification_options.tools_changed)
 
         # Set logging capabilities if handler exists
         if types.SetLevelRequest in self.request_handlers:  # pragma: no cover
@@ -343,9 +329,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def get_prompt(self):
         def decorator(
-            func: Callable[
-                [str, dict[str, str] | None], Awaitable[types.GetPromptResult]
-            ],
+            func: Callable[[str, dict[str, str] | None], Awaitable[types.GetPromptResult]],
         ):
             logger.debug("Registering handler for GetPromptRequest")
 
@@ -387,9 +371,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             async def handler(_: Any):
                 templates = await func()
-                return types.ServerResult(
-                    types.ListResourceTemplatesResult(resourceTemplates=templates)
-                )
+                return types.ServerResult(types.ListResourceTemplatesResult(resourceTemplates=templates))
 
             self.request_handlers[types.ListResourceTemplatesRequest] = handler
             return func
@@ -398,9 +380,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def read_resource(self):
         def decorator(
-            func: Callable[
-                [AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]
-            ],
+            func: Callable[[AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]],
         ):
             logger.debug("Registering handler for ReadResourceRequest")
 
@@ -433,8 +413,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                         content = create_content(data, None)
                     case Iterable() as contents:
                         contents_list = [
-                            create_content(content_item.content, content_item.mime_type)
-                            for content_item in contents
+                            create_content(content_item.content, content_item.mime_type) for content_item in contents
                         ]
                         return types.ServerResult(
                             types.ReadResourceResult(
@@ -513,14 +492,14 @@ class Server(Generic[LifespanResultT, RequestT]):
                     # Old style returns list[Tool]
                     tools = list(result)
 
-                # Validate tool names
+                # Validate tool names and cache ORIGINAL tools for server-side validation
+                self._tool_cache.clear()
                 for tool in tools:
                     validate_and_warn_tool_name(tool.name)
+                    self._tool_cache[tool.name] = tool
 
-                # Filter deprecated tools
-                tools = [
-                    tool for tool in tools if not getattr(tool, "is_deprecated", False)
-                ]
+                # Filter deprecated tools (for response only)
+                tools = [tool for tool in tools if not getattr(tool, "is_deprecated", False)]
 
                 # Filter deprecated properties from all tools
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
@@ -529,22 +508,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                 if hasattr(self, "config") and self.config is not None:
                     restricted_tools = self.config.get("restricted_tools", [])
                     if restricted_tools:
-                        tools = [
-                            tool for tool in tools if tool.name not in restricted_tools
-                        ]
+                        tools = [tool for tool in tools if tool.name not in restricted_tools]
 
                 # Filter for external clients
                 if hasattr(self, "config") and self.config is not None:
                     if self.config.get("external_client", False):
-                        tools = [
-                            filter_tool_definition_for_external_mcp(tool)
-                            for tool in tools
-                        ]
-
-                # Refresh the tool cache with filtered tools
-                self._tool_cache.clear()
-                for tool in tools:
-                    self._tool_cache[tool.name] = tool
+                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
 
                 return types.ServerResult(types.ListToolsResult(tools=tools))
 
@@ -574,9 +543,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         tool = self._tool_cache.get(tool_name)
         if tool is None:
-            logger.warning(
-                "Tool '%s' not listed, no validation will be performed", tool_name
-            )
+            logger.warning("Tool '%s' not listed, no validation will be performed", tool_name)
 
         return tool
 
@@ -618,21 +585,15 @@ class Server(Generic[LifespanResultT, RequestT]):
                     # input validation
                     if validate_input and tool:
                         try:
-                            jsonschema.validate(
-                                instance=arguments, schema=tool.inputSchema
-                            )
+                            jsonschema.validate(instance=arguments, schema=tool.inputSchema)
                         except jsonschema.ValidationError as e:
-                            return self._make_error_result(
-                                f"Input validation error: {e.message}"
-                            )
+                            return self._make_error_result(f"Input validation error: {e.message}")
 
                     # Check if tool is restricted
                     if hasattr(self, "config") and self.config is not None:
                         restricted_tools = self.config.get("restricted_tools", [])
                         if tool_name in restricted_tools:
-                            return self._make_error_result(
-                                f"Tool '{tool_name}' is restricted and cannot be used"
-                            )
+                            return self._make_error_result(f"Tool '{tool_name}' is restricted and cannot be used")
 
                     # tool call
                     results = await func(tool_name, arguments)
@@ -645,23 +606,15 @@ class Server(Generic[LifespanResultT, RequestT]):
                     elif isinstance(results, types.CreateTaskResult):
                         return types.ServerResult(results)
                     elif isinstance(results, tuple) and len(results) == 2:
-                        unstructured_content, maybe_structured_content = cast(
-                            CombinationContent, results
-                        )
+                        unstructured_content, maybe_structured_content = cast(CombinationContent, results)
                     elif isinstance(results, dict):
                         maybe_structured_content = cast(StructuredContent, results)
-                        unstructured_content = [
-                            types.TextContent(
-                                type="text", text=json.dumps(results, indent=2)
-                            )
-                        ]
+                        unstructured_content = [types.TextContent(type="text", text=json.dumps(results, indent=2))]
                     elif hasattr(results, "__iter__"):  # pragma: no cover
                         unstructured_content = cast(UnstructuredContent, results)
                         maybe_structured_content = None
                     else:  # pragma: no cover
-                        return self._make_error_result(
-                            f"Unexpected return type from tool: {type(results).__name__}"
-                        )
+                        return self._make_error_result(f"Unexpected return type from tool: {type(results).__name__}")
 
                     # output validation
                     if tool and tool.outputSchema is not None:
@@ -676,9 +629,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                                     schema=tool.outputSchema,
                                 )
                             except jsonschema.ValidationError as e:
-                                return self._make_error_result(
-                                    f"Output validation error: {e.message}"
-                                )
+                                return self._make_error_result(f"Output validation error: {e.message}")
 
                     content = list(unstructured_content)
 
@@ -689,23 +640,12 @@ class Server(Generic[LifespanResultT, RequestT]):
 
                             # Add default message for empty results when gummie_id exists
                             if not content and self.config.get("gummie_id"):
-                                content = [
-                                    types.TextContent(
-                                        type="text", text='{"message": "No result found"}'
-                                    )
-                                ]
+                                content = [types.TextContent(type="text", text='{"message": "No result found"}')]
 
                         # Aggregate all results into a single content item
-                        if (
-                            self.config.get("aggregate_tool_call_results", False)
-                            and content
-                        ):
+                        if self.config.get("aggregate_tool_call_results", False) and content:
                             serialized_content = [item.model_dump() for item in content]
-                            content = [
-                                types.TextContent(
-                                    type="text", text=json.dumps(serialized_content)
-                                )
-                            ]
+                            content = [types.TextContent(type="text", text=json.dumps(serialized_content))]
 
                     # result
                     return types.ServerResult(
@@ -737,9 +677,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def progress_notification(self):
         def decorator(
-            func: Callable[
-                [str | int, float, float | None, str | None], Awaitable[None]
-            ],
+            func: Callable[[str | int, float, float | None, str | None], Awaitable[None]],
         ):
             logger.debug("Registering handler for ProgressNotification")
 
@@ -772,9 +710,7 @@ class Server(Generic[LifespanResultT, RequestT]):
             logger.debug("Registering handler for CompleteRequest")
 
             async def handler(req: types.CompleteRequest):
-                completion = await func(
-                    req.params.ref, req.params.argument, req.params.context
-                )
+                completion = await func(req.params.ref, req.params.argument, req.params.context)
                 return types.ServerResult(
                     types.CompleteResult(
                         completion=(
@@ -837,24 +773,16 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     async def _handle_message(
         self,
-        message: (
-            RequestResponder[types.ClientRequest, types.ServerResult]
-            | types.ClientNotification
-            | Exception
-        ),
+        message: (RequestResponder[types.ClientRequest, types.ServerResult] | types.ClientNotification | Exception),
         session: ServerSession,
         lifespan_context: LifespanResultT,
         raise_exceptions: bool = False,
     ):
         with warnings.catch_warnings(record=True) as w:
             match message:
-                case RequestResponder(
-                    request=types.ClientRequest(root=req)
-                ) as responder:
+                case RequestResponder(request=types.ClientRequest(root=req)) as responder:
                     with responder:
-                        await self._handle_request(
-                            message, req, session, lifespan_context, raise_exceptions
-                        )
+                        await self._handle_request(message, req, session, lifespan_context, raise_exceptions)
                 case types.ClientNotification(root=notify):
                     await self._handle_notification(notify)
                 case Exception():  # pragma: no cover
@@ -868,9 +796,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                         raise message
 
             for warning in w:  # pragma: no cover
-                logger.info(
-                    "Warning: %s: %s", warning.category.__name__, warning.message
-                )
+                logger.info("Warning: %s: %s", warning.category.__name__, warning.message)
 
     async def _handle_request(
         self,

@@ -7,7 +7,7 @@ import pytest
 from mcp.server import Server
 from mcp.shared.exceptions import AuthError
 from mcp.shared.memory import create_connected_server_and_client_session
-from mcp.types import AuthErrorData, TextContent, Tool
+from mcp.types import AuthErrorData, Tool
 
 
 @pytest.mark.anyio
@@ -21,7 +21,9 @@ async def test_auth_error_returns_structured_data():
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        raise AuthError(AuthErrorData(error="credentials_not_found", message="Auth required", service="svc", error_status=401))
+        raise AuthError(
+            AuthErrorData(error="credentials_not_found", message="Auth required", service="svc", error_status=401)
+        )
 
     async with create_connected_server_and_client_session(server) as client:
         result = await client.call_tool("auth", {})
