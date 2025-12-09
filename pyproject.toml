@@ -126,7 +126,7 @@ max-statements = 102  # Default is 50
 members = ["examples/servers/*", "examples/snippets"]
 
 [tool.uv.sources]
-mcp = { workspace = true }
+gumloop-mcp = { workspace = true }
 
 [tool.pytest.ini_options]
 xfail_strict = true
