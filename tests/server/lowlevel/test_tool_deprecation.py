@@ -13,7 +13,7 @@ async def test_deprecated_tools_filtered():
     server = Server("test")
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         active = Tool(name="active", description="Active", inputSchema={"type": "object", "properties": {}})
         deprecated = Tool(name="deprecated", description="Old", inputSchema={"type": "object", "properties": {}})
         object.__setattr__(deprecated, "is_deprecated", True)
@@ -32,7 +32,7 @@ async def test_deprecated_properties_removed():
     server = Server("test")
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         return [
             Tool(
                 name="tool",

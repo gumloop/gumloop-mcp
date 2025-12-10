@@ -67,11 +67,12 @@ messages from the client.
 
 from __future__ import annotations as _annotations
 
+import base64
 import contextvars
+import copy
 import json
 import logging
 import warnings
-import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Any, Generic, TypeAlias, cast
@@ -83,14 +84,17 @@ from pydantic import AnyUrl
 from typing_extensions import TypeVar
 
 import mcp.types as types
+from mcp.server.experimental.request_context import Experimental
+from mcp.server.lowlevel.experimental import ExperimentalHandlers
 from mcp.server.lowlevel.func_inspection import create_call_wrapper
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.session import ServerSession
 from mcp.shared.context import RequestContext
-from mcp.shared.exceptions import McpError, AuthError
+from mcp.shared.exceptions import AuthError, McpError
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
+from mcp.shared.tool_name_validation import validate_and_warn_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -103,40 +107,31 @@ UnstructuredContent: TypeAlias = Iterable[types.ContentBlock]
 CombinationContent: TypeAlias = tuple[UnstructuredContent, StructuredContent]
 
 # This will be properly typed in each Server instance's context
-request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = (
-    contextvars.ContextVar("request_ctx")
-)
+request_ctx: contextvars.ContextVar[RequestContext[ServerSession, Any, Any]] = contextvars.ContextVar("request_ctx")
 
 
-def filter_tool_definition_for_external_mcp(tool_def):
+def filter_tool_definition_for_external_mcp(tool_def: types.Tool) -> types.Tool:
     """Remove custom guMCP extensions from tool definition for external MCP compatibility"""
-    if tool_def is None:
-        return tool_def
-
     filtered_tool = copy.deepcopy(tool_def)
     custom_fields = ["outputSchema", "requiredScopes", "creditCost"]
 
     for field in custom_fields:
         if hasattr(filtered_tool, field):
-            delattr(filtered_tool, field)
+            setattr(filtered_tool, field, None)
 
     return filtered_tool
 
 
-def filter_deprecated_properties_from_tool(tool_def):
+def filter_deprecated_properties_from_tool(tool_def: types.Tool) -> types.Tool:
     """Remove properties marked as deprecated from tool definition"""
-    properties = tool_def.inputSchema["properties"]
+    properties = tool_def.inputSchema.get("properties")
+    if not properties:
+        return tool_def
 
-    # Find deprecated properties
-    deprecated_props = {
-        name for name, prop in properties.items() if prop.get("is_deprecated") is True
-    }
-
-    # Return original if no deprecated properties found
+    deprecated_props = {name for name, prop in properties.items() if prop.get("is_deprecated") is True}
     if not deprecated_props:
         return tool_def
 
-    # Create filtered tool
     filtered_tool = copy.deepcopy(tool_def)
     filtered_tool.inputSchema["properties"] = {
         name: prop for name, prop in properties.items() if name not in deprecated_props
@@ -145,17 +140,15 @@ def filter_deprecated_properties_from_tool(tool_def):
     return filtered_tool
 
 
-def filter_response_content_for_external_mcp(content_list):
+def filter_response_content_for_external_mcp(content_list: list[types.ContentBlock]) -> list[types.ContentBlock]:
     """Remove creditCost from TextContent responses for external MCP compatibility"""
     if not content_list:
         return content_list
 
-    filtered_content = []
+    filtered_content: list[types.ContentBlock] = []
     for content in content_list:
-        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):
-            filtered_content.append(
-                types.TextContent(type=content.type, text=content.text)
-            )
+        if isinstance(content, types.TextContent) and hasattr(content, "creditCost"):  # pragma: no cover
+            filtered_content.append(types.TextContent(type=content.type, text=content.text))
         else:
             filtered_content.append(content)
 
@@ -175,9 +168,7 @@ class NotificationOptions:
 
 
 @asynccontextmanager
-async def lifespan(
-    _: Server[LifespanResultT, RequestT],
-) -> AsyncIterator[dict[str, Any]]:
+async def lifespan(_: Server[LifespanResultT, RequestT]) -> AsyncIterator[dict[str, Any]]:
     """Default lifespan context manager that does nothing.
 
     Args:
@@ -208,13 +199,13 @@ class Server(Generic[LifespanResultT, RequestT]):
         self.website_url = website_url
         self.icons = icons
         self.lifespan = lifespan
-        self.request_handlers: dict[
-            type, Callable[..., Awaitable[types.ServerResult]]
-        ] = {
+        self.config: dict[str, Any] | None = None
+        self.request_handlers: dict[type, Callable[..., Awaitable[types.ServerResult]]] = {
             types.PingRequest: _ping_handler,
         }
         self.notification_handlers: dict[type, Callable[..., Awaitable[None]]] = {}
         self._tool_cache: dict[str, types.Tool] = {}
+        self._experimental_handlers: ExperimentalHandlers | None = None
         logger.debug("Initializing server %r", name)
 
     def create_initialization_options(
@@ -229,10 +220,10 @@ class Server(Generic[LifespanResultT, RequestT]):
                 from importlib.metadata import version
 
                 return version(package)
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass
 
-            return "unknown"
+            return "unknown"  # pragma: no cover
 
         return InitializationOptions(
             server_name=self.name,
@@ -260,9 +251,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set prompt capabilities if handler exists
         if types.ListPromptsRequest in self.request_handlers:
-            prompts_capability = types.PromptsCapability(
-                listChanged=notification_options.prompts_changed
-            )
+            prompts_capability = types.PromptsCapability(listChanged=notification_options.prompts_changed)
 
         # Set resource capabilities if handler exists
         if types.ListResourcesRequest in self.request_handlers:
@@ -272,19 +261,17 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         # Set tool capabilities if handler exists
         if types.ListToolsRequest in self.request_handlers:
-            tools_capability = types.ToolsCapability(
-                listChanged=notification_options.tools_changed
-            )
+            tools_capability = types.ToolsCapability(listChanged=notification_options.tools_changed)
 
         # Set logging capabilities if handler exists
-        if types.SetLevelRequest in self.request_handlers:
+        if types.SetLevelRequest in self.request_handlers:  # pragma: no cover
             logging_capability = types.LoggingCapability()
 
         # Set completions capabilities if handler exists
         if types.CompleteRequest in self.request_handlers:
             completions_capability = types.CompletionsCapability()
 
-        return types.ServerCapabilities(
+        capabilities = types.ServerCapabilities(
             prompts=prompts_capability,
             resources=resources_capability,
             tools=tools_capability,
@@ -292,6 +279,9 @@ class Server(Generic[LifespanResultT, RequestT]):
             experimental=experimental_capabilities,
             completions=completions_capability,
         )
+        if self._experimental_handlers:
+            self._experimental_handlers.update_capabilities(capabilities)
+        return capabilities
 
     @property
     def request_context(
@@ -300,14 +290,22 @@ class Server(Generic[LifespanResultT, RequestT]):
         """If called outside of a request context, this will raise a LookupError."""
         return request_ctx.get()
 
+    @property
+    def experimental(self) -> ExperimentalHandlers:
+        """Experimental APIs for tasks and other features.
+
+        WARNING: These APIs are experimental and may change without notice.
+        """
+
+        # We create this inline so we only add these capabilities _if_ they're actually used
+        if self._experimental_handlers is None:
+            self._experimental_handlers = ExperimentalHandlers(self, self.request_handlers, self.notification_handlers)
+        return self._experimental_handlers
+
     def list_prompts(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Prompt]]]
-                | Callable[
-                    [types.ListPromptsRequest], Awaitable[types.ListPromptsResult]
-                ]
-            ),
+            func: Callable[[], Awaitable[list[types.Prompt]]]
+            | Callable[[types.ListPromptsRequest], Awaitable[types.ListPromptsResult]],
         ):
             logger.debug("Registering handler for PromptListRequest")
 
@@ -329,9 +327,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def get_prompt(self):
         def decorator(
-            func: Callable[
-                [str, dict[str, str] | None], Awaitable[types.GetPromptResult]
-            ],
+            func: Callable[[str, dict[str, str] | None], Awaitable[types.GetPromptResult]],
         ):
             logger.debug("Registering handler for GetPromptRequest")
 
@@ -346,12 +342,8 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def list_resources(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Resource]]]
-                | Callable[
-                    [types.ListResourcesRequest], Awaitable[types.ListResourcesResult]
-                ]
-            ),
+            func: Callable[[], Awaitable[list[types.Resource]]]
+            | Callable[[types.ListResourcesRequest], Awaitable[types.ListResourcesResult]],
         ):
             logger.debug("Registering handler for ListResourcesRequest")
 
@@ -364,9 +356,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                     return types.ServerResult(result)
                 else:
                     # Old style returns list[Resource]
-                    return types.ServerResult(
-                        types.ListResourcesResult(resources=result)
-                    )
+                    return types.ServerResult(types.ListResourcesResult(resources=result))
 
             self.request_handlers[types.ListResourcesRequest] = handler
             return func
@@ -379,9 +369,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             async def handler(_: Any):
                 templates = await func()
-                return types.ServerResult(
-                    types.ListResourceTemplatesResult(resourceTemplates=templates)
-                )
+                return types.ServerResult(types.ListResourceTemplatesResult(resourceTemplates=templates))
 
             self.request_handlers[types.ListResourceTemplatesRequest] = handler
             return func
@@ -390,9 +378,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def read_resource(self):
         def decorator(
-            func: Callable[
-                [AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]
-            ],
+            func: Callable[[AnyUrl], Awaitable[str | bytes | Iterable[ReadResourceContents]]],
         ):
             logger.debug("Registering handler for ReadResourceRequest")
 
@@ -407,9 +393,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                                 text=data,
                                 mimeType=mime_type or "text/plain",
                             )
-                        case bytes() as data:
-                            import base64
-
+                        case bytes() as data:  # pragma: no cover
                             return types.BlobResourceContents(
                                 uri=req.params.uri,
                                 blob=base64.b64encode(data).decode(),
@@ -417,7 +401,7 @@ class Server(Generic[LifespanResultT, RequestT]):
                             )
 
                 match result:
-                    case str() | bytes() as data:
+                    case str() | bytes() as data:  # pragma: no cover
                         warnings.warn(
                             "Returning str or bytes from read_resource is deprecated. "
                             "Use Iterable[ReadResourceContents] instead.",
@@ -427,20 +411,17 @@ class Server(Generic[LifespanResultT, RequestT]):
                         content = create_content(data, None)
                     case Iterable() as contents:
                         contents_list = [
-                            create_content(content_item.content, content_item.mime_type)
-                            for content_item in contents
+                            create_content(content_item.content, content_item.mime_type) for content_item in contents
                         ]
                         return types.ServerResult(
                             types.ReadResourceResult(
                                 contents=contents_list,
                             )
                         )
-                    case _:
-                        raise ValueError(
-                            f"Unexpected return type from read_resource: {type(result)}"
-                        )
+                    case _:  # pragma: no cover
+                        raise ValueError(f"Unexpected return type from read_resource: {type(result)}")
 
-                return types.ServerResult(
+                return types.ServerResult(  # pragma: no cover
                     types.ReadResourceResult(
                         contents=[content],
                     )
@@ -451,7 +432,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def set_logging_level(self):
+    def set_logging_level(self):  # pragma: no cover
         def decorator(func: Callable[[types.LoggingLevel], Awaitable[None]]):
             logger.debug("Registering handler for SetLevelRequest")
 
@@ -464,7 +445,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def subscribe_resource(self):
+    def subscribe_resource(self):  # pragma: no cover
         def decorator(func: Callable[[AnyUrl], Awaitable[None]]):
             logger.debug("Registering handler for SubscribeRequest")
 
@@ -477,7 +458,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         return decorator
 
-    def unsubscribe_resource(self):
+    def unsubscribe_resource(self):  # pragma: no cover
         def decorator(func: Callable[[AnyUrl], Awaitable[None]]):
             logger.debug("Registering handler for UnsubscribeRequest")
 
@@ -492,10 +473,8 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def list_tools(self):
         def decorator(
-            func: (
-                Callable[[], Awaitable[list[types.Tool]]]
-                | Callable[[types.ListToolsRequest], Awaitable[types.ListToolsResult]]
-            ),
+            func: Callable[[], Awaitable[list[types.Tool]]]
+            | Callable[[types.ListToolsRequest], Awaitable[types.ListToolsResult]],
         ):
             logger.debug("Registering handler for ListToolsRequest")
 
@@ -505,40 +484,33 @@ class Server(Generic[LifespanResultT, RequestT]):
                 result = await wrapper(req)
 
                 # Handle both old style (list[Tool]) and new style (ListToolsResult)
-                if isinstance(result, types.ListToolsResult):
+                if isinstance(result, types.ListToolsResult):  # pragma: no cover
                     tools = result.tools
                 else:
                     # Old style returns list[Tool]
-                    tools = result
+                    tools = list(result)
 
-                # Filter deprecated tools
-                tools = [
-                    tool for tool in tools if not getattr(tool, "is_deprecated", False)
-                ]
+                # Validate tool names and cache ORIGINAL tools for server-side validation
+                self._tool_cache.clear()
+                for tool in tools:
+                    validate_and_warn_tool_name(tool.name)
+                    self._tool_cache[tool.name] = tool
+
+                # Filter deprecated tools (for response only)
+                tools = [tool for tool in tools if not getattr(tool, "is_deprecated", False)]
 
                 # Filter deprecated properties from all tools
                 tools = [filter_deprecated_properties_from_tool(tool) for tool in tools]
 
                 # Filter restricted tools
-                if hasattr(self, "config") and self.config is not None:
+                if self.config is not None:
                     restricted_tools = self.config.get("restricted_tools", [])
                     if restricted_tools:
-                        tools = [
-                            tool for tool in tools if tool.name not in restricted_tools
-                        ]
+                        tools = [tool for tool in tools if tool.name not in restricted_tools]
 
-                # Filter for external clients
-                if hasattr(self, "config") and self.config is not None:
+                    # Filter for external clients
                     if self.config.get("external_client", False):
-                        tools = [
-                            filter_tool_definition_for_external_mcp(tool)
-                            for tool in tools
-                        ]
-
-                # Refresh the tool cache with filtered tools
-                self._tool_cache.clear()
-                for tool in tools:
-                    self._tool_cache[tool.name] = tool
+                        tools = [filter_tool_definition_for_external_mcp(tool) for tool in tools]
 
                 return types.ServerResult(types.ListToolsResult(tools=tools))
 
@@ -568,9 +540,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
         tool = self._tool_cache.get(tool_name)
         if tool is None:
-            logger.warning(
-                "Tool '%s' not listed, no validation will be performed", tool_name
-            )
+            logger.warning("Tool '%s' not listed, no validation will be performed", tool_name)
 
         return tool
 
@@ -592,7 +562,13 @@ class Server(Generic[LifespanResultT, RequestT]):
         def decorator(
             func: Callable[
                 ...,
-                Awaitable[UnstructuredContent | StructuredContent | CombinationContent],
+                Awaitable[
+                    UnstructuredContent
+                    | StructuredContent
+                    | CombinationContent
+                    | types.CallToolResult
+                    | types.CreateTaskResult
+                ],
             ],
         ):
             logger.debug("Registering handler for CallToolRequest")
@@ -606,48 +582,68 @@ class Server(Generic[LifespanResultT, RequestT]):
                     # input validation
                     if validate_input and tool:
                         try:
-                            jsonschema.validate(
-                                instance=arguments, schema=tool.inputSchema
-                            )
+                            jsonschema.validate(instance=arguments, schema=tool.inputSchema)
                         except jsonschema.ValidationError as e:
-                            return self._make_error_result(
-                                f"Input validation error: {e.message}"
-                            )
+                            return self._make_error_result(f"Input validation error: {e.message}")
 
                     # Check if tool is restricted
-                    if hasattr(self, "config") and self.config is not None:
+                    if self.config is not None:
                         restricted_tools = self.config.get("restricted_tools", [])
                         if tool_name in restricted_tools:
-                            return self._make_error_result(
-                                f"Tool '{tool_name}' is restricted and cannot be used"
-                            )
+                            return self._make_error_result(f"Tool '{tool_name}' is restricted and cannot be used")
 
                     # tool call
                     results = await func(tool_name, arguments)
-                    content = list(results)
+
+                    # output normalization
+                    unstructured_content: UnstructuredContent
+                    maybe_structured_content: StructuredContent | None
+                    if isinstance(results, types.CallToolResult):
+                        return types.ServerResult(results)
+                    elif isinstance(results, types.CreateTaskResult):
+                        return types.ServerResult(results)
+                    elif isinstance(results, tuple) and len(results) == 2:
+                        unstructured_content, maybe_structured_content = cast(CombinationContent, results)
+                    elif isinstance(results, dict):
+                        maybe_structured_content = cast(StructuredContent, results)
+                        unstructured_content = [types.TextContent(type="text", text=json.dumps(results, indent=2))]
+                    elif hasattr(results, "__iter__"):  # pragma: no cover
+                        unstructured_content = cast(UnstructuredContent, results)
+                        maybe_structured_content = None
+                    else:  # pragma: no cover
+                        return self._make_error_result(f"Unexpected return type from tool: {type(results).__name__}")
+
+                    # output validation (only validate if structured content is provided)
+                    if tool and tool.outputSchema is not None and maybe_structured_content is not None:
+                        try:
+                            jsonschema.validate(
+                                instance=maybe_structured_content,
+                                schema=tool.outputSchema,
+                            )
+                        except jsonschema.ValidationError as e:
+                            return self._make_error_result(f"Output validation error: {e.message}")
+
+                    content = list(unstructured_content)
 
                     # Filter for external clients
-                    if hasattr(self, "config") and self.config is not None:
+                    if self.config is not None:
                         if self.config.get("external_client", False):
                             content = filter_response_content_for_external_mcp(content)
-                            
+
                             # Add default message for empty results when gummie_id exists
                             if not content and self.config.get("gummie_id"):
-                                content = [
-                                    types.TextContent(type="text", text='{"message": "No result found"}')
-                                ]
-                        
+                                content = [types.TextContent(type="text", text='{"message": "No result found"}')]
+
                         # Aggregate all results into a single content item
                         if self.config.get("aggregate_tool_call_results", False) and content:
                             serialized_content = [item.model_dump() for item in content]
-                            content = [
-                                types.TextContent(type="text", text=json.dumps(serialized_content))
-                            ]
+                            content = [types.TextContent(type="text", text=json.dumps(serialized_content))]
 
                     # result
                     return types.ServerResult(
                         types.CallToolResult(
                             content=list(content),
+                            structuredContent=maybe_structured_content,
                             isError=False,
                         )
                     )
@@ -673,9 +669,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     def progress_notification(self):
         def decorator(
-            func: Callable[
-                [str | int, float, float | None, str | None], Awaitable[None]
-            ],
+            func: Callable[[str | int, float, float | None, str | None], Awaitable[None]],
         ):
             logger.debug("Registering handler for ProgressNotification")
 
@@ -708,9 +702,7 @@ class Server(Generic[LifespanResultT, RequestT]):
             logger.debug("Registering handler for CompleteRequest")
 
             async def handler(req: types.CompleteRequest):
-                completion = await func(
-                    req.params.ref, req.params.argument, req.params.context
-                )
+                completion = await func(req.params.ref, req.params.argument, req.params.context)
                 return types.ServerResult(
                     types.CompleteResult(
                         completion=(
@@ -753,6 +745,12 @@ class Server(Generic[LifespanResultT, RequestT]):
                 )
             )
 
+            # Configure task support for this session if enabled
+            task_support = self._experimental_handlers.task_support if self._experimental_handlers else None
+            if task_support is not None:
+                task_support.configure_session(session)
+                await stack.enter_async_context(task_support.run())
+
             async with anyio.create_task_group() as tg:
                 async for message in session.incoming_messages:
                     logger.debug("Received message: %s", message)
@@ -767,67 +765,84 @@ class Server(Generic[LifespanResultT, RequestT]):
 
     async def _handle_message(
         self,
-        message: (
-            RequestResponder[types.ClientRequest, types.ServerResult]
-            | types.ClientNotification
-            | Exception
-        ),
+        message: (RequestResponder[types.ClientRequest, types.ServerResult] | types.ClientNotification | Exception),
         session: ServerSession,
         lifespan_context: LifespanResultT,
         raise_exceptions: bool = False,
     ):
         with warnings.catch_warnings(record=True) as w:
-            # TODO(Marcelo): We should be checking if message is Exception here.
-            match message:  # type: ignore[reportMatchNotExhaustive]
-                case RequestResponder(
-                    request=types.ClientRequest(root=req)
-                ) as responder:
+            match message:
+                case RequestResponder(request=types.ClientRequest(root=req)) as responder:
                     with responder:
-                        await self._handle_request(
-                            message, req, session, lifespan_context, raise_exceptions
-                        )
+                        await self._handle_request(message, req, session, lifespan_context, raise_exceptions)
                 case types.ClientNotification(root=notify):
                     await self._handle_notification(notify)
+                case Exception():  # pragma: no cover
+                    logger.error(f"Received exception from stream: {message}")
+                    await session.send_log_message(
+                        level="error",
+                        data="Internal Server Error",
+                        logger="mcp.server.exception_handler",
+                    )
+                    if raise_exceptions:
+                        raise message
 
-            for warning in w:
-                logger.info(
-                    "Warning: %s: %s", warning.category.__name__, warning.message
-                )
+            for warning in w:  # pragma: no cover
+                logger.info("Warning: %s: %s", warning.category.__name__, warning.message)
 
     async def _handle_request(
         self,
         message: RequestResponder[types.ClientRequest, types.ServerResult],
-        req: Any,
+        req: types.ClientRequestType,
         session: ServerSession,
         lifespan_context: LifespanResultT,
         raise_exceptions: bool,
     ):
         logger.info("Processing request of type %s", type(req).__name__)
-        if handler := self.request_handlers.get(type(req)):  # type: ignore
+
+        if handler := self.request_handlers.get(type(req)):
             logger.debug("Dispatching request of type %s", type(req).__name__)
 
             token = None
             try:
-                # Extract request context from message metadata
+                # Extract request context and close_sse_stream from message metadata
                 request_data = None
+                close_sse_stream_cb = None
+                close_standalone_sse_stream_cb = None
                 if message.message_metadata is not None and isinstance(
                     message.message_metadata, ServerMessageMetadata
-                ):
+                ):  # pragma: no cover
                     request_data = message.message_metadata.request_context
+                    close_sse_stream_cb = message.message_metadata.close_sse_stream
+                    close_standalone_sse_stream_cb = message.message_metadata.close_standalone_sse_stream
 
                 # Set our global state that can be retrieved via
                 # app.get_request_context()
+                client_capabilities = session.client_params.capabilities if session.client_params else None
+                task_support = self._experimental_handlers.task_support if self._experimental_handlers else None
+                # Get task metadata from request params if present
+                task_metadata = None
+                if hasattr(req, "params") and req.params is not None:
+                    task_metadata = getattr(req.params, "task", None)
                 token = request_ctx.set(
                     RequestContext(
                         message.request_id,
                         message.request_meta,
                         session,
                         lifespan_context,
+                        Experimental(
+                            task_metadata=task_metadata,
+                            _client_capabilities=client_capabilities,
+                            _session=session,
+                            _task_support=task_support,
+                        ),
                         request=request_data,
+                        close_sse_stream=close_sse_stream_cb,
+                        close_standalone_sse_stream=close_standalone_sse_stream_cb,
                     )
                 )
                 response = await handler(req)
-            except McpError as err:
+            except McpError as err:  # pragma: no cover
                 response = err.error
             except anyio.get_cancelled_exc_class():
                 logger.info(
@@ -837,15 +852,15 @@ class Server(Generic[LifespanResultT, RequestT]):
                 return
             except Exception as err:
                 if raise_exceptions:
-                    raise err
+                    raise err  # pragma: no cover
                 response = types.ErrorData(code=0, message=str(err), data=None)
             finally:
                 # Reset the global state after we are done
-                if token is not None:
+                if token is not None:  # pragma: no branch
                     request_ctx.reset(token)
 
             await message.respond(response)
-        else:
+        else:  # pragma: no cover
             await message.respond(
                 types.ErrorData(
                     code=types.METHOD_NOT_FOUND,
@@ -861,7 +876,7 @@ class Server(Generic[LifespanResultT, RequestT]):
 
             try:
                 await handler(notify)
-            except Exception:
+            except Exception:  # pragma: no cover
                 logger.exception("Uncaught exception in notification handler")
 
 

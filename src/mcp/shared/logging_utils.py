@@ -15,7 +15,7 @@ class UrlRedactingFilter(logging.Filter):
     URL_PATTERN = re.compile(r"https?://(?:[a-zA-Z0-9-]+\.)*mcp\.gumloop\.com[^\s]*")
 
     @staticmethod
-    def _redact_url(match):
+    def _redact_url(match: re.Match[str]) -> str:
         """Redact a URL to only show scheme and netloc."""
         url = match.group(0)
         parsed = urlparse(url)
@@ -36,11 +36,7 @@ class UrlRedactingFilter(logging.Filter):
                 record.args = new_args
             else:
                 record.args = tuple(
-                    (
-                        self.URL_PATTERN.sub(self._redact_url, arg)
-                        if isinstance(arg, str)
-                        else arg
-                    )
+                    (self.URL_PATTERN.sub(self._redact_url, arg) if isinstance(arg, str) else arg)
                     for arg in record.args
                 )
 
@@ -49,12 +45,7 @@ class UrlRedactingFilter(logging.Filter):
             exc = record.exc_info[1]
             if hasattr(exc, "args") and exc.args:
                 redacted_args = tuple(
-                    (
-                        self.URL_PATTERN.sub(self._redact_url, arg)
-                        if isinstance(arg, str)
-                        else arg
-                    )
-                    for arg in exc.args
+                    (self.URL_PATTERN.sub(self._redact_url, arg) if isinstance(arg, str) else arg) for arg in exc.args
                 )
                 exc.args = redacted_args
 

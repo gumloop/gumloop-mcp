@@ -1,5 +1,7 @@
 """Tests for Gumloop restricted_tools config."""
 
+from typing import Any
+
 import pytest
 
 from mcp.server import Server
@@ -21,7 +23,7 @@ async def test_restricted_tools_filtered_from_list():
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:  # pragma: no cover
         return [TextContent(type="text", text="ok")]
 
     async with create_connected_server_and_client_session(server) as client:
@@ -42,14 +44,16 @@ async def test_restricted_tool_call_returns_error():
         return [Tool(name="blocked", description="Blocked", inputSchema={"type": "object", "properties": {}})]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:  # pragma: no cover
         return [TextContent(type="text", text="should not reach")]
 
     async with create_connected_server_and_client_session(server) as client:
         result = await client.call_tool("blocked", {})
 
     assert result.isError is True
-    assert "restricted" in result.content[0].text.lower()
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert "restricted" in content.text.lower()
 
 
 @pytest.mark.anyio

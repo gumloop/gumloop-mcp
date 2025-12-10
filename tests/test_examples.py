@@ -45,6 +45,23 @@ async def test_complex_inputs():
 
 
 @pytest.mark.anyio
+async def test_direct_call_tool_result_return():
+    """Test the CallToolResult echo server"""
+    from examples.fastmcp.direct_call_tool_result_return import mcp
+
+    async with client_session(mcp._mcp_server) as client:
+        result = await client.call_tool("echo", {"text": "hello"})
+        assert len(result.content) == 1
+        content = result.content[0]
+        assert isinstance(content, TextContent)
+        assert content.text == "hello"
+        assert result.structuredContent
+        assert result.structuredContent["text"] == "hello"
+        assert isinstance(result.meta, dict)
+        assert result.meta["some"] == "metadata"
+
+
+@pytest.mark.anyio
 async def test_desktop(monkeypatch: pytest.MonkeyPatch):
     """Test the desktop server"""
     from pathlib import Path
@@ -72,26 +89,26 @@ async def test_desktop(monkeypatch: pytest.MonkeyPatch):
         content = result.contents[0]
         assert isinstance(content, TextResourceContents)
         assert isinstance(content.text, str)
-        if sys.platform == "win32":
+        if sys.platform == "win32":  # pragma: no cover
             file_1 = "/fake/path/file1.txt".replace("/", "\\\\")  # might be a bug
             file_2 = "/fake/path/file2.txt".replace("/", "\\\\")  # might be a bug
             assert file_1 in content.text
             assert file_2 in content.text
             # might be a bug, but the test is passing
-        else:
+        else:  # pragma: no cover
             assert "/fake/path/file1.txt" in content.text
             assert "/fake/path/file2.txt" in content.text
 
 
 @pytest.mark.parametrize("example", find_examples("README.md"), ids=str)
-def test_docs_examples(example: CodeExample, eval_example: EvalExample):
+def test_docs_examples(example: CodeExample, eval_example: EvalExample):  # pragma: no cover
     ruff_ignore: list[str] = ["F841", "I001", "F821"]  # F821: undefined names (snippets lack imports)
 
     # Use project's actual line length of 120
     eval_example.set_config(ruff_ignore=ruff_ignore, target_version="py310", line_length=120)
 
     # Use Ruff for both formatting and linting (skip Black)
-    if eval_example.update_examples:  # pragma: no cover
+    if eval_example.update_examples:
         eval_example.format_ruff(example)
     else:
         eval_example.lint_ruff(example)

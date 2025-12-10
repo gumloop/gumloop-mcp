@@ -1,6 +1,7 @@
 """Tests for Gumloop aggregate_tool_call_results config."""
 
 import json
+from typing import Any
 
 import pytest
 
@@ -16,11 +17,11 @@ async def test_aggregate_tool_call_results_enabled():
     server.config = {"aggregate_tool_call_results": True}
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         return [Tool(name="multi", description="Multi", inputSchema={"type": "object", "properties": {}})]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text="Result 1"), TextContent(type="text", text="Result 2")]
 
     async with create_connected_server_and_client_session(server) as client:
@@ -28,7 +29,9 @@ async def test_aggregate_tool_call_results_enabled():
 
     assert result.isError is False
     assert len(result.content) == 1
-    parsed = json.loads(result.content[0].text)
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    parsed = json.loads(content.text)
     assert len(parsed) == 2
     assert parsed[0]["text"] == "Result 1"
     assert parsed[1]["text"] == "Result 2"
@@ -40,11 +43,11 @@ async def test_aggregate_tool_call_results_disabled():
     server = Server("test")
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[Tool]:
         return [Tool(name="multi", description="Multi", inputSchema={"type": "object", "properties": {}})]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text="Result 1"), TextContent(type="text", text="Result 2")]
 
     async with create_connected_server_and_client_session(server) as client:
@@ -52,5 +55,7 @@ async def test_aggregate_tool_call_results_disabled():
 
     assert result.isError is False
     assert len(result.content) == 2
-    assert result.content[0].text == "Result 1"
-    assert result.content[1].text == "Result 2"
+    c0, c1 = result.content[0], result.content[1]
+    assert isinstance(c0, TextContent) and isinstance(c1, TextContent)
+    assert c0.text == "Result 1"
+    assert c1.text == "Result 2"
